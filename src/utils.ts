@@ -2,6 +2,8 @@
  * Small shared helpers for @browsercore/http3.
  */
 
+import type { Bytes } from "./types.js";
+
 /**
  * Exhaustiveness check for `switch`/`if-else` over discriminated unions.
  * Call in the `default` branch: `default: assertNever(x)`.
@@ -12,7 +14,7 @@ export function assertNever(x: never): never {
 }
 
 /** Concatenate two byte arrays. */
-export function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
+export function concat(a: Bytes, b: Bytes): Bytes {
     const out = new Uint8Array(a.length + b.length);
     out.set(a, 0);
     out.set(b, a.length);
@@ -20,7 +22,7 @@ export function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
 }
 
 /** Concatenate many byte arrays into one. */
-export function concatAll(parts: readonly Uint8Array[]): Uint8Array {
+export function concatAll(parts: readonly Bytes[]): Bytes {
     let total = 0;
     for (const p of parts) {
         total += p.length;

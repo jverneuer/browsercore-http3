@@ -18,7 +18,7 @@
  * TODO (Step 5 of PLAN.md): implement the stream manager.
  */
 
-import type { Http3Response } from "../types.js";
+import type { Bytes, Http3Response } from "../types.js";
 
 /** A single HTTP/3 request/response exchange on a bidirectional stream. */
 export interface Http3Stream {
@@ -28,6 +28,17 @@ export interface Http3Stream {
     readonly requestComplete: boolean;
     /** True once the response HEADERS arrived. */
     readonly responseHeadersComplete: boolean;
+}
+
+/**
+ * Callbacks the stream manager uses to send control frames back on the
+ * connection. Injected so the manager stays I/O-free and testable.
+ */
+export interface StreamManagerHandlers {
+    /** Send a GOAWAY frame, announcing the last acceptable stream id. */
+    readonly sendGoaway: (streamId: bigint) => void;
+    /** Send a CANCEL_PUSH frame for the given push id. */
+    readonly sendCancelPush: (pushId: bigint) => void;
 }
 
 /** A handle the stream manager exposes to the connection for sending. */
@@ -40,22 +51,17 @@ export interface StreamManager {
     ): void;
 
     /** Dispatch a frame read from a bidirectional (request) stream. */
-    dispatchRequestFrame(streamId: bigint, payload: Uint8Array): void;
+    dispatchRequestFrame(streamId: bigint, payload: Bytes): void;
 
     /** Dispatch a frame read from the control stream. */
-    dispatchControlFrame(payload: Uint8Array): void;
+    dispatchControlFrame(payload: Bytes): void;
 
     /** Reject every in-flight request with `error`. */
     abortAll(error: Error): void;
 }
 
 /** Create a stream manager bound to the connection's frame I/O. */
-export function createStreamManager(
-    _handlers: {
-        sendGoaway: (streamId: bigint) => void;
-        sendCancelPush: (pushId: bigint) => void;
-    },
-): StreamManager {
+export function createStreamManager(_handlers: StreamManagerHandlers): StreamManager {
     void _handlers;
     throw new Error("TODO: implement createStreamManager (Step 5)");
 }

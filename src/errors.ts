@@ -7,11 +7,12 @@
 
 /** Base class for all HTTP/3 errors. */
 export class Http3Error extends Error {
-    public readonly kind = "Http3Error" as const;
+    public readonly kind = "Http3Error";
     public override readonly cause: Error | undefined;
 
     constructor(message: string, options?: { cause?: Error }) {
         super(message, options);
+        // `new.target.name` picks up the concrete subclass name automatically.
         this.name = new.target.name;
         this.cause = options?.cause;
     }
@@ -19,7 +20,7 @@ export class Http3Error extends Error {
 
 /** The peer sent a GOAWAY — the connection is going down. */
 export class GoawayReceivedError extends Error {
-    public readonly kind = "GoawayReceivedError" as const;
+    public readonly kind = "GoawayReceivedError";
     public readonly lastStreamId: bigint;
     public override readonly cause: Error | undefined;
 
@@ -33,7 +34,7 @@ export class GoawayReceivedError extends Error {
 
 /** The peer cancelled a pushed resource via CANCEL_PUSH. */
 export class PushCancelledError extends Error {
-    public readonly kind = "PushCancelledError" as const;
+    public readonly kind = "PushCancelledError";
     public readonly pushId: bigint;
     public override readonly cause: Error | undefined;
 
@@ -47,7 +48,7 @@ export class PushCancelledError extends Error {
 
 /** A frame could not be parsed from the wire. */
 export class FrameParseError extends Error {
-    public readonly kind = "FrameParseError" as const;
+    public readonly kind = "FrameParseError";
     public readonly offset: number;
     public override readonly cause: Error | undefined;
 
@@ -61,7 +62,7 @@ export class FrameParseError extends Error {
 
 /** A QPACK header block could not be decoded. */
 export class QpackDecodeError extends Error {
-    public readonly kind = "QpackDecodeError" as const;
+    public readonly kind = "QpackDecodeError";
     public override readonly cause: Error | undefined;
 
     constructor(message: string, options?: { cause?: Error }) {
@@ -73,7 +74,7 @@ export class QpackDecodeError extends Error {
 
 /** The peer violated the SETTINGS limits we advertised. */
 export class SettingsViolationError extends Error {
-    public readonly kind = "SettingsViolationError" as const;
+    public readonly kind = "SettingsViolationError";
     public readonly setting: number;
     public readonly value: number;
     public override readonly cause: Error | undefined;
@@ -89,7 +90,7 @@ export class SettingsViolationError extends Error {
 
 /** The peer acknowledged our SETTINGS frame never arrived within the timeout. */
 export class SettingsAckTimeoutError extends Error {
-    public readonly kind = "SettingsAckTimeoutError" as const;
+    public readonly kind = "SettingsAckTimeoutError";
     public readonly timeoutMs: number;
     public override readonly cause: Error | undefined;
 

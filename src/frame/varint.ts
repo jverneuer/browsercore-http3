@@ -8,7 +8,13 @@
  * TODO (Step 1 of PLAN.md): implement encodeVarint / decodeVarint.
  */
 
-import { VARINT_MAX } from "../types.js";
+import { VARINT_MAX, type Bytes } from "../types.js";
+
+/** A varint that has been decoded from the wire, plus the bytes it occupied. */
+export interface DecodedVarint {
+    readonly value: bigint;
+    readonly length: number;
+}
 
 /** Return the number of bytes needed to encode `value` as a varint. */
 export function getVarintEncodedLength(value: bigint): number {
@@ -31,7 +37,7 @@ export function getVarintEncodedLength(value: bigint): number {
 }
 
 /** Encode a varint to its wire representation. */
-export function encodeVarint(value: bigint): Uint8Array {
+export function encodeVarint(value: bigint): Bytes {
     void value;
     throw new Error("TODO: implement encodeVarint (Step 1)");
 }
@@ -40,7 +46,7 @@ export function encodeVarint(value: bigint): Uint8Array {
  * Decode a varint from the start of `buf`. Returns the value and the number of
  * bytes consumed. Throws RangeError if the buffer is too short.
  */
-export function decodeVarint(buf: Uint8Array): { readonly value: bigint; readonly length: number } {
+export function decodeVarint(buf: Bytes): DecodedVarint {
     void buf;
     throw new Error("TODO: implement decodeVarint (Step 1)");
 }

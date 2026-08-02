@@ -21,6 +21,7 @@ export {
     Http3FrameType,
     type BaseHttp3Frame,
     type Http3Frame,
+    type Http3FrameOfType,
     type Http3FrameTypeValue,
 } from "./frame/frame.js";
 
@@ -48,7 +49,7 @@ export {
 export type { HeaderField, HeaderBlock } from "./qpack/qpack.js";
 
 export { createStreamManager } from "./stream/stream.js";
-export type { Http3Stream, StreamManager } from "./stream/stream.js";
+export type { Http3Stream, StreamManager, StreamManagerHandlers } from "./stream/stream.js";
 
 export {
     type Http3Connection,
@@ -61,6 +62,8 @@ export {
 } from "./types.js";
 
 export { decodeVarint, encodeVarint, getVarintEncodedLength } from "./frame/varint.js";
+export type { DecodedVarint } from "./frame/varint.js";
 export { VARINT_MAX } from "./types.js";
+export type { Bytes } from "./types.js";
 
 export { assertNever } from "./utils.js";

@@ -18,18 +18,18 @@
  * and the wire-instruction codecs.
  */
 
-import type { HeaderField, HeaderBlock } from "../types.js";
+import type { Bytes, HeaderField, HeaderBlock } from "../types.js";
 
 export type { HeaderField, HeaderBlock };
 
 /** Encode a headers map into a QPACK header block. */
-export function encodeHeaders(_headers: ReadonlyMap<string, string>): Uint8Array {
+export function encodeHeaders(_headers: ReadonlyMap<string, string>): Bytes {
     void _headers;
     throw new Error("TODO: implement encodeHeaders (QPACK, Step 3)");
 }
 
 /** Decode a QPACK header block into a headers map. */
-export function decodeHeaders(_buf: Uint8Array): ReadonlyMap<string, string> {
+export function decodeHeaders(_buf: Bytes): ReadonlyMap<string, string> {
     void _buf;
     throw new Error("TODO: implement decodeHeaders (QPACK, Step 3)");
 }
@@ -42,7 +42,7 @@ export class QpackEncoder {
     }
 
     /** Encode a headers map into a QPACK header block. */
-    public encode(_headers: ReadonlyMap<string, string>): Uint8Array {
+    public encode(_headers: ReadonlyMap<string, string>): Bytes {
         void _headers;
         throw new Error("TODO: implement QpackEncoder.encode (Step 4)");
     }
@@ -56,7 +56,7 @@ export class QpackDecoder {
     }
 
     /** Decode a QPACK header block into a headers map. */
-    public decode(_block: Uint8Array): ReadonlyMap<string, string> {
+    public decode(_block: Bytes): ReadonlyMap<string, string> {
         void _block;
         throw new Error("TODO: implement QpackDecoder.decode (Step 4)");
     }

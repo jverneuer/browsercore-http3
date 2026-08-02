@@ -19,6 +19,13 @@
  */
 
 // ---------------------------------------------------------------------------
+// Domain primitives
+// ---------------------------------------------------------------------------
+
+/** A contiguous chunk of wire bytes. */
+export type Bytes = Uint8Array;
+
+// ---------------------------------------------------------------------------
 // QUIC abstraction (injected — this package implements none of it)
 // ---------------------------------------------------------------------------
 
@@ -30,9 +37,9 @@
  */
 export interface QuicStream {
     /** Write bytes to the stream. Resolves when handed to the kernel / buffered. */
-    write(data: Uint8Array): Promise<void>;
+    write(data: Bytes): Promise<void>;
     /** Read the next chunk of bytes, or reject if the stream closes first. */
-    read(): Promise<Uint8Array>;
+    read(): Promise<Bytes>;
     /** Close the stream. */
     close(): Promise<void>;
 }
@@ -133,12 +140,12 @@ export interface BaseHttp3Frame {
 
 export interface Http3DataFrame extends BaseHttp3Frame {
     readonly type: typeof Http3FrameType.DATA;
-    readonly payload: Uint8Array;
+    readonly payload: Bytes;
 }
 
 export interface Http3HeadersFrame extends BaseHttp3Frame {
     readonly type: typeof Http3FrameType.HEADERS;
-    readonly payload: Uint8Array;
+    readonly payload: Bytes;
 }
 
 export interface Http3CancelPushFrame extends BaseHttp3Frame {
@@ -154,7 +161,7 @@ export interface Http3SettingsFrame extends BaseHttp3Frame {
 export interface Http3PushPromiseFrame extends BaseHttp3Frame {
     readonly type: typeof Http3FrameType.PUSH_PROMISE;
     readonly pushId: bigint;
-    readonly payload: Uint8Array;
+    readonly payload: Bytes;
 }
 
 export interface Http3GoawayFrame extends BaseHttp3Frame {
@@ -184,8 +191,8 @@ export type Http3Frame =
 /** A QPACK encoder instruction (writes to the QPACK encoder stream). */
 export type QpackEncoderInstruction =
     | { readonly kind: "setDynamicTableCapacity"; readonly capacity: number }
-    | { readonly kind: "insertWithNameReference"; readonly nameIndex: number; readonly value: Uint8Array }
-    | { readonly kind: "insertWithoutNameReference"; readonly name: Uint8Array; readonly value: Uint8Array }
+    | { readonly kind: "insertWithNameReference"; readonly nameIndex: number; readonly value: Bytes }
+    | { readonly kind: "insertWithoutNameReference"; readonly name: Bytes; readonly value: Bytes }
     | { readonly kind: "duplicate"; readonly index: number };
 
 /** A QPACK decoder instruction (writes to the QPACK decoder stream). */
@@ -201,7 +208,7 @@ export interface HeaderField {
 }
 
 /** A serialized QPACK/HPACK header block (the payload of a HEADERS frame). */
-export type HeaderBlock = Uint8Array;
+export type HeaderBlock = Bytes;
 
 // ---------------------------------------------------------------------------
 // Request / response / connection contract
@@ -214,14 +221,14 @@ export interface Http3Request {
     readonly authority: string;
     readonly path: string;
     readonly headers: ReadonlyMap<string, string>;
-    readonly body: Uint8Array | undefined;
+    readonly body: Bytes | undefined;
 }
 
 /** A response on an HTTP/3 bidirectional stream. */
 export interface Http3Response {
     readonly statusCode: number;
     readonly headers: ReadonlyMap<string, string>;
-    readonly body: Uint8Array;
+    readonly body: Bytes;
 }
 
 /** Public contract for an HTTP/3 connection. */

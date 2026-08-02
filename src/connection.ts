@@ -29,7 +29,7 @@ import type {
 /** Concrete HTTP/3 connection. */
 export class Http3ConnectionImpl implements Http3Connection {
     public readonly id: string;
-    public settings: Http3SettingsMap;
+    public readonly settings: Http3SettingsMap;
 
     public constructor(_options: Http3Options) {
         void _options;
