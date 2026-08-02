@@ -1,0 +1,66 @@
+/**
+ * @browsercore/http3 — public API surface.
+ *
+ * HTTP/3 framing + QPACK over QUIC streams. No knowledge of UDP, QUIC, or TLS.
+ * Higher layers (fetch, profiles) compose exclusively through these exports.
+ */
+
+export { connectHttp3, Http3ConnectionImpl } from "./connection.js";
+
+export {
+    FrameParseError,
+    GoawayReceivedError,
+    Http3Error,
+    PushCancelledError,
+    QpackDecodeError,
+    SettingsAckTimeoutError,
+    SettingsViolationError,
+} from "./errors.js";
+
+export {
+    Http3FrameType,
+    type BaseHttp3Frame,
+    type Http3Frame,
+    type Http3FrameTypeValue,
+} from "./frame/frame.js";
+
+export {
+    Http3Settings,
+    Http3StreamType,
+    type Http3CancelPushFrame,
+    type Http3DataFrame,
+    type Http3GoawayFrame,
+    type Http3HeadersFrame,
+    type Http3MaxPushIdFrame,
+    type Http3PushPromiseFrame,
+    type Http3SettingsFrame,
+    type Http3SettingsKey,
+    type Http3SettingsMap,
+    type Http3StreamTypeValue,
+} from "./types.js";
+
+export {
+    decodeHeaders as qpackDecodeHeaders,
+    encodeHeaders as qpackEncodeHeaders,
+    QpackDecoder,
+    QpackEncoder,
+} from "./qpack/qpack.js";
+export type { HeaderField, HeaderBlock } from "./qpack/qpack.js";
+
+export { createStreamManager } from "./stream/stream.js";
+export type { Http3Stream, StreamManager } from "./stream/stream.js";
+
+export {
+    type Http3Connection,
+    type Http3Options,
+    type Http3Request,
+    type Http3Response,
+    type QuicConnection,
+    type QuicCloseReason,
+    type QuicStream,
+} from "./types.js";
+
+export { decodeVarint, encodeVarint, getVarintEncodedLength } from "./frame/varint.js";
+export { VARINT_MAX } from "./types.js";
+
+export { assertNever } from "./utils.js";
