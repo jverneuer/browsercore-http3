@@ -1,7 +1,7 @@
 {
   "name": "@browsercore/http3",
-  "version": "0.1.0",
-  "description": "HTTP/3 framing + QPACK over QUIC streams. No knowledge of UDP, QUIC internals, or TLS — only HTTP/3 wire format over a QUIC connection.",
+  "version": "0.1.3",
+  "description": "HTTP/3 framing + QPACK over QUIC streams. No knowledge of UDP, QUIC internals, or TLS \u2014 only HTTP/3 wire format over a QUIC connection.",
   "repository": {
     "type": "git",
     "url": "https://github.com/jverneuer/browsercore-http3.git"
