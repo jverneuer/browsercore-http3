@@ -12,11 +12,21 @@ import { VARINT_MAX } from "../types.js";
 
 /** Return the number of bytes needed to encode `value` as a varint. */
 export function getVarintEncodedLength(value: bigint): number {
-    if (value < 0n) throw new RangeError(`varint cannot be negative: ${value}`);
-    if (value > VARINT_MAX) throw new RangeError(`varint overflow: ${value}`);
-    if (value < (1n << 6n)) return 1;
-    if (value < (1n << 14n)) return 2;
-    if (value < (1n << 30n)) return 4;
+    if (value < 0n) {
+        throw new RangeError(`varint cannot be negative: ${value}`);
+    }
+    if (value > VARINT_MAX) {
+        throw new RangeError(`varint overflow: ${value}`);
+    }
+    if (value < (1n << 6n)) {
+        return 1;
+    }
+    if (value < (1n << 14n)) {
+        return 2;
+    }
+    if (value < (1n << 30n)) {
+        return 4;
+    }
     return 8;
 }
 

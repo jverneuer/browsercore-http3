@@ -40,6 +40,12 @@ export class QpackEncoder {
         void _capacity;
         throw new Error("TODO: implement QpackEncoder (Step 4)");
     }
+
+    /** Encode a headers map into a QPACK header block. */
+    public encode(_headers: ReadonlyMap<string, string>): Uint8Array {
+        void _headers;
+        throw new Error("TODO: implement QpackEncoder.encode (Step 4)");
+    }
 }
 
 /** QPACK decoder: consumes header blocks + decoder-stream instructions. */
@@ -47,5 +53,11 @@ export class QpackDecoder {
     public constructor(_capacity = 0) {
         void _capacity;
         throw new Error("TODO: implement QpackDecoder (Step 4)");
+    }
+
+    /** Decode a QPACK header block into a headers map. */
+    public decode(_block: Uint8Array): ReadonlyMap<string, string> {
+        void _block;
+        throw new Error("TODO: implement QpackDecoder.decode (Step 4)");
     }
 }

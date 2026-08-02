@@ -1,5 +1,10 @@
 # @browsercore/http3
 
+
+[![npm version](https://img.shields.io/npm/v/@browsercore/http3)](https://www.npmjs.com/package/@browsercore/http3)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jverneuer/browsercore-http3/main/coverage/badge.json)](https://github.com/jverneuer/browsercore-http3/blob/main/COVERAGE.md)
+[![lint](https://img.shields.io/github/actions/workflow/status/jverneuer/browsercore-http3/ci.yml?label=lint)](https://github.com/jverneuer/browsercore-http3/actions/workflows/ci.yml)
+
 HTTP/3 framing + QPACK over QUIC streams.
 
 ## Responsibility

@@ -38,18 +38,18 @@ export class Http3ConnectionImpl implements Http3Connection {
         throw new Error("TODO: implement Http3ConnectionImpl (Step 6)");
     }
 
-    public async request(_req: Http3Request): Promise<Http3Response> {
+    public request(_req: Http3Request): Promise<Http3Response> {
         void _req;
-        throw new Error("TODO: implement request (Step 7)");
+        return Promise.reject(new Error("TODO: implement request (Step 7)"));
     }
 
-    public async goaway(_streamId: bigint): Promise<void> {
+    public goaway(_streamId: bigint): Promise<void> {
         void _streamId;
-        throw new Error("TODO: implement goaway (Step 8)");
+        return Promise.reject(new Error("TODO: implement goaway (Step 8)"));
     }
 
-    public async close(): Promise<void> {
-        throw new Error("TODO: implement close (Step 8)");
+    public close(): Promise<void> {
+        return Promise.reject(new Error("TODO: implement close (Step 8)"));
     }
 }
 
@@ -59,7 +59,7 @@ export class Http3ConnectionImpl implements Http3Connection {
  * Opens the control + QPACK streams, sends SETTINGS, and awaits the peer's
  * SETTINGS.
  */
-export async function connectHttp3(_options: Http3Options): Promise<Http3Connection> {
+export function connectHttp3(_options: Http3Options): Promise<Http3Connection> {
     void _options;
-    throw new Error("TODO: implement connectHttp3 (Step 6)");
+    return Promise.reject(new Error("TODO: implement connectHttp3 (Step 6)"));
 }

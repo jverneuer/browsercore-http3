@@ -34,11 +34,11 @@ export function serializeFrame(_frame: Http3Frame): Uint8Array {
  * Read one HTTP/3 frame from a stream reader. Pulls exactly the type, length,
  * and payload bytes. Throws FrameParseError on malformed input.
  */
-export async function readFrame(
+export function readFrame(
     _read: () => Promise<Uint8Array>,
 ): Promise<Http3Frame> {
     void _read;
-    throw new Error("TODO: implement readFrame (Step 2)");
+    return Promise.reject(new Error("TODO: implement readFrame (Step 2)"));
 }
 
 void assertNever;
