@@ -3,12 +3,9 @@
  * is covered in http3.test.ts). Focuses on the type hierarchy, the `kind`
  * discriminant used for runtime matching, and the throw/catch contract.
  *
- * Notable pinned behavior: although `Http3Error` is documented as the "Base
- * class for all HTTP/3 errors" (src/errors.ts:8), the six other error classes
- * extend `Error` directly, NOT `Http3Error`. A caller writing
- * `if (e instanceof Http3Error)` to catch every HTTP/3 failure will MISS them.
- * That is documented here as the actual (if surprising) behavior — see the
- * source findings in the final report.
+ * `Http3Error` is documented as the "Base class for all HTTP/3 errors"
+ * (src/errors.ts:8) and the six other error classes extend it, so a caller
+ * writing `if (e instanceof Http3Error)` catches every HTTP/3 failure.
  */
 
 import { describe, it, expect } from "vitest";
@@ -49,18 +46,18 @@ describe("error hierarchy", () => {
         }
     });
 
-    it("Http3Error is NOT a base class for the other errors (pinned behavior)", () => {
+    it("Http3Error is a base class for all the other errors", () => {
         // Documented as "Base class for all HTTP/3 errors" in src/errors.ts:8,
-        // but the subclasses extend Error directly. instanceof Http3Error must
-        // therefore be false for them — a footgun for catch-all handlers.
-        expect(new GoawayReceivedError(0n)).not.toBeInstanceOf(Http3Error);
-        expect(new PushCancelledError(0n)).not.toBeInstanceOf(Http3Error);
-        expect(new FrameParseError(0)).not.toBeInstanceOf(Http3Error);
-        expect(new QpackDecodeError("x")).not.toBeInstanceOf(Http3Error);
-        expect(new SettingsViolationError(1, 0)).not.toBeInstanceOf(Http3Error);
-        expect(new SettingsAckTimeoutError(0)).not.toBeInstanceOf(Http3Error);
+        // and the subclasses extend Http3Error, so instanceof Http3Error is
+        // true for them — catch-all handlers now work as documented.
+        expect(new GoawayReceivedError(0n)).toBeInstanceOf(Http3Error);
+        expect(new PushCancelledError(0n)).toBeInstanceOf(Http3Error);
+        expect(new FrameParseError(0)).toBeInstanceOf(Http3Error);
+        expect(new QpackDecodeError("x")).toBeInstanceOf(Http3Error);
+        expect(new SettingsViolationError(1, 0)).toBeInstanceOf(Http3Error);
+        expect(new SettingsAckTimeoutError(0)).toBeInstanceOf(Http3Error);
 
-        // Only Http3Error itself is an instance of Http3Error.
+        // Http3Error itself is also an instance of Http3Error.
         expect(new Http3Error("x")).toBeInstanceOf(Http3Error);
     });
 
