@@ -1,57 +1,54 @@
 {
-  "name": "@browsercore/http3",
-  "version": "0.1.4",
-  "description": "HTTP/3 framing + QPACK over QUIC streams. No knowledge of UDP, QUIC internals, or TLS — only HTTP/3 wire format over a QUIC connection.",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/jverneuer/browsercore-http3.git"
-  },
-  "homepage": "https://github.com/jverneuer/browsercore-http3#readme",
-  "bugs": {
-    "url": "https://github.com/jverneuer/browsercore-http3/issues"
-  },
-  "license": "MIT",
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+    "name": "@browsercore/http3",
+    "version": "0.1.4",
+    "description": "HTTP/3 framing + QPACK over QUIC streams. No knowledge of UDP, QUIC internals, or TLS — only HTTP/3 wire format over a QUIC connection.",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/jverneuer/browsercore-http3.git"
+    },
+    "homepage": "https://github.com/jverneuer/browsercore-http3#readme",
+    "bugs": {
+        "url": "https://github.com/jverneuer/browsercore-http3/issues"
+    },
+    "license": "MIT",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "publishConfig": {
+        "access": "public",
+        "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+        "clean": "rm -rf dist *.tsbuildinfo",
+        "build": "tsc -p tsconfig.build.json",
+        "prepublishOnly": "npm run clean && npm run build",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "lint": "oxlint --type-aware src/",
+        "test": "vitest run"
+    },
+    "dependencies": {
+        "@browsercore/quic": "0.1.4"
+    },
+    "devDependencies": {
+        "@types/node": "^26.1.2",
+        "@vitest/coverage-v8": "^4.1.10",
+        "oxlint": "^1.76.0",
+        "oxlint-tsgolint": "7.0.2001",
+        "typescript": "^7.0.0",
+        "vitest": "^4.1.10"
+    },
+    "engines": {
+        "node": ">=26.0.0"
     }
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
-  "scripts": {
-    "clean": "rm -rf dist *.tsbuildinfo",
-    "build": "tsc -p tsconfig.build.json",
-    "prepublishOnly": "npm run clean && npm run build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint --type-aware src/",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "@browsercore/quic": "0.1.4"
-  },
-  "devDependencies": {
-    "@types/node": "^26.1.2",
-    "@vitest/coverage-v8": "2.1.8",
-    "oxlint": "^1.76.0",
-    "oxlint-tsgolint": "7.0.2001",
-    "typescript": "^7.0.0",
-    "vitest": "2.1.8"
-  },
-  "overrides": {
-    "vitest": "2.1.8"
-  },
-  "engines": {
-    "node": ">=26.0.0"
-  }
 }
