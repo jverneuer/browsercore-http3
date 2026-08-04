@@ -373,14 +373,14 @@ export class Http3ConnectionImpl implements Http3Connection {
 
     private async onPushPromise(pushId: bigint): Promise<void> {
         const waiter = this.pushWaiters.shift();
-        if (waiter !== undefined) {
-            this.manager.expectPush(pushId, waiter.resolve, waiter.reject);
-        } else {
+        if (waiter === undefined) {
             this.manager.expectPush(pushId, (res) => {
                 this.pushQueue.push(res);
             }, (err) => {
                 void err;
             });
+        } else {
+            this.manager.expectPush(pushId, waiter.resolve, waiter.reject);
         }
         let stream: QuicStream;
         try {
@@ -402,6 +402,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         });
         try {
             for (;;) {
+                // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
                 const frame = await reader.readFrame();
                 this.manager.dispatchPushFrame(pushId, frame);
             }
