@@ -247,9 +247,13 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             case HTTP3_UNKNOWN_FRAME_TYPE:
                 // GREASE / reserved — ignore.
                 break;
-            default:
-                // Frames illegal on a request/response stream are ignored here;
-                // the connection layer enforces stream-type correctness.
+            // Frames illegal on a request/response stream are ignored here;
+            // the connection layer enforces stream-type correctness.
+            case Http3FrameType.SETTINGS:
+            case Http3FrameType.CANCEL_PUSH:
+            case Http3FrameType.PUSH_PROMISE:
+            case Http3FrameType.GOAWAY:
+            case Http3FrameType.MAX_PUSH_ID:
                 break;
         }
         if (p.headersComplete && p.endStreamSeen) {
@@ -275,7 +279,13 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
                 break;
             case HTTP3_UNKNOWN_FRAME_TYPE:
                 break;
-            default:
+            // A control stream carries only control frames; anything else is
+            // ignored here (the connection layer enforces stream-type
+            // correctness).
+            case Http3FrameType.DATA:
+            case Http3FrameType.HEADERS:
+            case Http3FrameType.CANCEL_PUSH:
+            case Http3FrameType.PUSH_PROMISE:
                 break;
         }
     }
@@ -348,7 +358,7 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         removeAllListeners: (event?: string | symbol) => {
             emitter.removeAllListeners(event);
         },
-        emit: (event: string | symbol, ...args: unknown[]) => emitter.emit(event, args),
+        emit: (event: string | symbol, ...args: unknown[]) => emitter.emit(event, ...args),
     } as StreamManager & EventEmitter;
 
     return manager;

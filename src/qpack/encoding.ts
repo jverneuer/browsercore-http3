@@ -47,7 +47,7 @@ export class ByteReader {
         }
         // pos is guarded above; read the octet without a non-null assertion.
         const octet = this.buf[this.pos];
-        return octet === undefined ? 0 : octet;
+        return octet ?? 0;
     }
 
     public read(): number {
@@ -151,8 +151,12 @@ export function writePrefixedIntWithBase(
  */
 export function readTaggedStringLiteral(reader: ByteReader, n: number): string {
     const first = reader.read();
-    const huffmanMask = 1 << (n - 1);
-    const lengthMask = huffmanMask - 1;
+    // RFC 9204 §4.3.3 (Insert-With-Literal-Name): 01 H <Name Length n+>. The
+    // H flag sits just above the n-bit length prefix, i.e. at bit n; the
+    // length occupies bits n-1..0. (Using bit n-1 here would misread the H
+    // flag and reject names whose length sets that bit.)
+    const huffmanMask = 1 << n;
+    const lengthMask = (1 << n) - 1;
     const huffman = (first & huffmanMask) !== 0;
     let length = first & lengthMask;
     const max = (1 << n) - 1;

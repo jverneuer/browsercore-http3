@@ -84,11 +84,17 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.quic = options.quic;
         this.qpackDec = new QpackDecoder();
         this.manager = createStreamManager({
-            sendGoaway: (streamId) => void this.sendGoaway(streamId),
-            sendCancelPush: (pushId) => void this.sendCancelPush(pushId),
+            sendGoaway: (streamId) => {
+                void this.sendGoaway(streamId);
+            },
+            sendCancelPush: (pushId) => {
+                void this.sendCancelPush(pushId);
+            },
         });
         this.manager.setHeaderDecoder((block) => this.decodeHeaders(block));
-        this.manager.on("goaway", (lastStreamId: bigint) => this.onPeerGoaway(lastStreamId));
+        this.manager.on("goaway", (lastStreamId: bigint) => {
+            this.onPeerGoaway(lastStreamId);
+        });
     }
 
     // --- public Http3Connection surface ----------------------------------------
@@ -311,11 +317,11 @@ export class Http3ConnectionImpl implements Http3Connection {
 
         // Accept the peer's control + QPACK streams and start their read loops.
         const peerControl = await this.quic.acceptUnidirectionalStream();
-        this.startControlReadLoop(peerControl);
+        void this.startControlReadLoop(peerControl);
         const peerEncoder = await this.quic.acceptUnidirectionalStream();
-        this.startEncoderStreamReadLoop(peerEncoder);
+        void this.startEncoderStreamReadLoop(peerEncoder);
         const peerDecoder = await this.quic.acceptUnidirectionalStream();
-        this.startDecoderStreamReadLoop(peerDecoder);
+        void this.startDecoderStreamReadLoop(peerDecoder);
 
         // Wait for the peer's SETTINGS (signalled via the manager's "settings" event).
         return new Promise<void>((resolve, reject) => {

@@ -96,7 +96,7 @@ export function decodeVarint(buf: Bytes): DecodedVarint {
     // under noUncheckedIndexedAccess.
     const at = (i: number): number => {
         const v = buf[i];
-        return v === undefined ? 0 : v;
+        return v ?? 0;
     };
     const masked = BigInt(at(0) & 0x3f);
     let value: bigint;

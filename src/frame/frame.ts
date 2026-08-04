@@ -96,7 +96,7 @@ function serializePayload(frame: Http3Frame): Bytes {
             // Exhaustiveness guard — forces a compile error if a variant is
             // added without a serialization branch.
             const unreachable: never = frame;
-            throw new Error(`serializePayload: unhandled frame type ${unreachable}`);
+            throw new Error(`serializePayload: unhandled frame type ${String(unreachable)}`);
         }
     }
 }
