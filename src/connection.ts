@@ -180,7 +180,8 @@ export class Http3ConnectionImpl implements Http3Connection {
             return;
         }
         this.closing = true;
-        await this.sendGoaway(this.nextStreamId);
+        // abortAll signals GOAWAY + CANCEL_PUSH to the peer via the manager's
+        // handlers, then drops every in-flight resolver.
         this.manager.abortAll(new Error("connection closed"));
         this.closed = true;
         await this.quic.close(0n, "client_close");
