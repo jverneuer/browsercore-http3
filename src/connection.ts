@@ -434,12 +434,18 @@ export class Http3ConnectionImpl implements Http3Connection {
 /**
  * Establish an HTTP/3 connection over an existing QUIC connection.
  *
- * Opens the control + QPACK streams, sends SETTINGS, and awaits the peer's
- * SETTINGS.
+ * Awaits the QUIC handshake (so the connection is protected before any HTTP/3
+ * frames travel), then opens the control + QPACK streams, sends SETTINGS, and
+ * awaits the peer's SETTINGS.
  */
 export async function connectHttp3(options: Http3Options): Promise<Http3Connection> {
     const id = `http3_${Date.now().toString(36)}`;
     const timeoutMs = options.settingsAckTimeoutMs ?? DEFAULT_SETTINGS_ACK_TIMEOUT_MS;
+    // The QUIC handshake must complete before we exchange HTTP/3 SETTINGS —
+    // until it resolves the connection is unprotected and frames must not be
+    // written. Awaiting it here guarantees the SETTINGS exchange (and all
+    // request/response traffic) travels over the protected QUIC connection.
+    await options.quic.handshake();
     const conn = new Http3ConnectionImpl(id, options);
     await conn.doHandshake(timeoutMs);
     return conn;

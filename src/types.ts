@@ -59,6 +59,13 @@ export type QuicCloseReason =
 export interface QuicConnection {
     /** Opaque identifier for logging / correlation. */
     readonly id: string;
+    /**
+     * Resolve when the QUIC handshake completes and the connection is
+     * protected. HTTP/3 SETTINGS exchange may only begin after this resolves —
+     * frames written before the handshake complete would travel over an
+     * unprotected connection.
+     */
+    handshake(): Promise<void>;
     /** Open a new bidirectional stream (request/response). */
     openBidirectionalStream(): Promise<QuicStream>;
     /** Accept the next incoming bidirectional stream from the peer. */

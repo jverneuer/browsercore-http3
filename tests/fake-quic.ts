@@ -91,15 +91,46 @@ class QuicFace implements QuicConnection {
     private closed = false;
     public peerRef!: QuicFace;
 
+    /**
+     * The QUIC handshake is modelled as a promise that the peer completes.
+     * `handshake()` returns it; `completeHandshake()` (called by the peer's
+     * driver once it is ready to traffic) resolves it. Until it resolves the
+     * connection is "unprotected" — HTTP/3 frames must not be written.
+     */
+    private readonly handshakePromise: Promise<void>;
+    private handshakeResolve!: () => void;
+
     public constructor(id: string, isClient: boolean) {
         this.id = id;
         // Client-initiated bidi streams are 0 mod 4; server-initiated are 1 mod 4.
         this.nextBidi = isClient ? 0 : 1;
         this.nextUni = isClient ? 2 : 3;
+        this.handshakePromise = new Promise<void>((resolve) => {
+            this.handshakeResolve = resolve;
+        });
     }
 
     private get peer(): QuicFace {
         return this.peerRef;
+    }
+
+    // --- handshake (RFC 9000 §7) -------------------------------------------
+
+    /**
+     * Resolve when the QUIC handshake completes and the connection is
+     * protected. HTTP/3 SETTINGS exchange may only begin after this resolves.
+     */
+    public handshake(): Promise<void> {
+        return this.handshakePromise;
+    }
+
+    /**
+     * Signal that this face's side of the QUIC handshake is complete. Resolves
+     * the peer's `handshake()` promise so it may begin exchanging HTTP/3
+     * frames over the now-protected connection.
+     */
+    public completeHandshake(): void {
+        this.handshakeResolve();
     }
 
     private open(kind: "bidirectional" | "unidirectional"): FakeStream {
@@ -199,11 +230,26 @@ export class FakeQuic {
         this.client = this.clientFace;
         this.server = this.serverFace;
     }
+
+    /**
+     * Signal that both sides of the QUIC handshake are complete. Resolves both
+     * faces' `handshake()` promises so HTTP/3 SETTINGS exchange may begin over
+     * the protected connection. Server drivers call this once they are ready to
+     * traffic.
+     */
+    public completeHandshake(): void {
+        this.clientFace.completeHandshake();
+        this.serverFace.completeHandshake();
+    }
 }
 
 /**
- * Drive the server face: complete the handshake and serve a 200 response to
- * every request. Resolves when the control stream closes.
+ * Drive the server face: complete the HTTP/3 SETTINGS exchange and serve a
+ * 200 response to every request. Resolves when the control stream closes.
+ *
+ * The caller is responsible for calling `quic.completeHandshake()` (on the
+ * owning `FakeQuic`) to signal that the QUIC handshake is complete — without
+ * it, `connectHttp3()` will block on `quic.handshake()` forever.
  */
 export async function driveFakeServer(server: QuicConnection): Promise<void> {
     // Accept the client's control + QPACK streams.
