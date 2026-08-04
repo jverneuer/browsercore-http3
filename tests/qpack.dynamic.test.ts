@@ -321,15 +321,18 @@ describe("QpackDecoder — decoder-stream instruction emission", () => {
         const { encoderBytes } = enc.encode(new Map([["k", "v"]]));
         dec.consumeEncoderStream(encoderBytes);
         const ici = dec.emitInsertCountIncrement();
-        expect(Array.from(ici)).toEqual([1]);
+        // Wire format (RFC 9204 §4.4.3): 1 <Increment 6+> -> 0x80 | 1 = 0x81.
+        expect(Array.from(ici)).toEqual([0x81]);
     });
 
     it("emits Section Acknowledgment and Stream Cancellation", () => {
         const dec = new QpackDecoder();
         const ack = dec.emitSectionAcknowledgment(10n);
+        // Wire format (RFC 9204 §4.4.1): 0 0 <Stream ID 7+> -> 10.
         expect(Array.from(ack)).toEqual([10]);
         const cancel = dec.emitStreamCancellation(5n);
-        expect(Array.from(cancel)).toEqual([5]);
+        // Wire format (RFC 9204 §4.4.2): 0 1 <Stream ID 6+> -> 0x40 | 5 = 0x45.
+        expect(Array.from(cancel)).toEqual([0x45]);
     });
 });
 
