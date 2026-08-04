@@ -114,7 +114,7 @@ export function huffmanDecode(reader: ByteReader, length: number): string {
         }
         let matched = false;
         for (const row of HUFFMAN_TABLE) {
-            if (row.bits > bitsAvailable) continue;
+            if (row.bits > bitsAvailable) { continue; }
             const shift = bitsAvailable - row.bits;
             const top = Math.floor(bitBuffer / 2 ** shift) % (2 ** row.bits);
             if (top === row.code) {
@@ -125,10 +125,10 @@ export function huffmanDecode(reader: ByteReader, length: number): string {
                 break;
             }
         }
-        if (!matched) throw new QpackDecodeError("huffman decode: no matching code");
+        if (!matched) { throw new QpackDecodeError("huffman decode: no matching code"); }
         if (remaining === 0) {
             const mod = bitsAvailable > 0 ? 2 ** bitsAvailable : 1;
-            if (bitBuffer % mod === mod - 1) break;
+            if (bitBuffer % mod === mod - 1) { break; }
         }
     }
     return new TextDecoder().decode(Uint8Array.from(chars));
