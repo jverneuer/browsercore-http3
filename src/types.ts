@@ -246,43 +246,36 @@ export interface HeaderField {
 export type HeaderBlock = Bytes;
 
 // ---------------------------------------------------------------------------
-// Logger abstraction (injected — decouples protocol code from `console`)
+// Clock abstraction (injected — decouples protocol code from wall-clock time)
 // ---------------------------------------------------------------------------
 
 /**
- * Logging abstraction for HTTP/3 internals. Injected via {@link Http3Options}
- * so callers control sink + verbosity without the protocol layer depending on
- * `console` directly — keeps the package testable and embeddable in non-Node
- * hosts (browsers, workers) where `console` may not be the desired sink.
+ * Time-source abstraction for HTTP/3 internals. Injected via {@link Http3Options}
+ * so callers can substitute a deterministic clock in tests instead of relying on
+ * the wall clock (`Date.now()` / `setTimeout`). The default is {@link systemClock},
+ * backed by the platform primitives.
  *
- * All methods are synchronous and MUST NOT throw — logging failures must never
- * disrupt protocol operation.
+ * `setTimeout` returns a disposer rather than an opaque handle: a timer and its
+ * cancellation are a single unit, so the handle never escapes into protocol code
+ * and a fake clock can back both with plain data structures — no platform cast.
  */
-export interface Logger {
-    /** Verbose diagnostics — disabled by default in production. */
-    debug(message: string, ...meta: readonly unknown[]): void;
-    /** Recoverable anomaly (e.g. peer SETTINGS violation we tolerated). */
-    warn(message: string, ...meta: readonly unknown[]): void;
-    /** Non-recoverable failure (e.g. GOAWAY received, handshake timeout). */
-    error(message: string, ...meta: readonly unknown[]): void;
+export interface Clock {
+    /** Milliseconds since epoch — mirrors `Date.now()`. */
+    now(): number;
+    /**
+     * Schedule `callback` after `delayMs`. Returns a disposer that cancels the
+     * pending timer when called — mirrors `setTimeout`/`clearTimeout` as one op.
+     */
+    setTimeout(callback: () => void, delayMs: number): () => void;
 }
 
-/** A silent logger — drops every call. This is the default. */
-export const silentLogger: Logger = {
-    debug: () => {},
-    warn: () => {},
-    error: () => {},
-};
-
-/**
- * A development logger — forwards to the platform `console`. Opt-in; the
- * default is {@link silentLogger} so production callers must explicitly enable
- * noise.
- */
-export const devLogger: Logger = {
-    debug: (message, ...meta) => console.debug(message, ...meta),
-    warn: (message, ...meta) => console.warn(message, ...meta),
-    error: (message, ...meta) => console.error(message, ...meta),
+/** The platform-backed default clock — `Date.now()` + `setTimeout`. */
+export const systemClock: Clock = {
+    now: () => Date.now(),
+    setTimeout: (callback, delayMs) => {
+        const timer = setTimeout(callback, delayMs);
+        return () => clearTimeout(timer);
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -337,9 +330,8 @@ export interface Http3Options {
     /** Timeout for receiving the peer's SETTINGS ACK. Default 5000ms. */
     readonly settingsAckTimeoutMs?: number;
     /**
-     * Logger for protocol diagnostics. Defaults to {@link silentLogger} — no
-     * output unless the caller opts in. Use {@link devLogger} to forward to
-     * `console`.
+     * Time source for the connection. Defaults to {@link systemClock}. Inject a
+     * deterministic clock in tests to control time without real waits.
      */
-    readonly logger?: Logger;
+    readonly clock?: Clock;
 }

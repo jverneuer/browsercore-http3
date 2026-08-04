@@ -43,9 +43,9 @@ import type { RandomSource } from "@browsercore/transport";
 import { nodeRandomSource } from "@browsercore/transport";
 import {
     Http3FrameType,
-    silentLogger,
+    systemClock,
     type Bytes,
-    type ConnectionId,
+    type Clock,
     type Http3Connection,
     type Http3Frame,
     type Http3Options,
@@ -96,7 +96,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private readonly qpackDec: QpackDecoder;
     private readonly qpackEnc: QpackEncoder;
     private readonly manager: ReturnType<typeof createStreamManager> & EventEmitter;
-    private readonly logger: Logger;
+    private readonly clock: Clock;
 
     /** Our control + QPACK streams (written to). */
     private controlStream: QuicStream | undefined;
@@ -118,7 +118,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.id = id;
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
-        this.logger = options.logger ?? silentLogger;
+        this.clock = options.clock ?? systemClock;
         this.qpackDec = new QpackDecoder();
         // Apply our advertised QPACK max capacity to both codec sides. Our
         // advertised capacity is a safe initial bound for the encoder (the peer
@@ -254,8 +254,9 @@ export class Http3ConnectionImpl implements Http3Connection {
         }
         this.logger.debug("closing connection", { id: this.id });
         this.closing = true;
-        await this.sendGoaway(this.nextStreamId);
-        this.manager.abortAll(new ConnectionClosedError());
+        // abortAll signals GOAWAY + CANCEL_PUSH to the peer via the manager's
+        // handlers, then drops every in-flight resolver.
+        this.manager.abortAll(new Error("connection closed"));
         this.closed = true;
         await this.quic.close(0n, "client_close");
     }
@@ -354,6 +355,8 @@ export class Http3ConnectionImpl implements Http3Connection {
                 for (;;) {
                     // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
                     const frame = await reader.readFrame();
+                    // eslint-disable-next-line no-console
+                    console.error("BIDI", streamId.toString(), frame.type);
                     this.manager.dispatchRequestFrame(streamId, frame);
                 }
             } catch {
@@ -565,14 +568,14 @@ export class Http3ConnectionImpl implements Http3Connection {
 
         // Wait for the peer's SETTINGS (signalled via the manager's "settings" event).
         return new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(() => {
+            const cancel = this.clock.setTimeout(() => {
                 this.manager.off("settings", onSettings);
                 reject(new SettingsAckTimeoutError(timeoutMs));
                 this.manager.abortAll(new SettingsAckTimeoutError(timeoutMs));
             }, timeoutMs);
 
             const onSettings = (): void => {
-                clearTimeout(timer);
+                cancel();
                 this.manager.off("settings", onSettings);
                 this.logger.debug("SETTINGS handshake complete", {
                     id: this.id,
@@ -628,6 +631,8 @@ export class Http3ConnectionImpl implements Http3Connection {
                 for (;;) {
                     // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
                     const frame = await reader.readFrame();
+                    // eslint-disable-next-line no-console
+                    console.error("PUSH", pushId.toString(), frame.type);
                     this.manager.dispatchPushFrame(pushId, frame);
                 }
             } catch {
@@ -650,7 +655,8 @@ export class Http3ConnectionImpl implements Http3Connection {
  * awaits the peer's SETTINGS.
  */
 export async function connectHttp3(options: Http3Options): Promise<Http3Connection> {
-    const id = createId("http3") as ConnectionId;
+    const clock = options.clock ?? systemClock;
+    const id = `http3_${clock.now().toString(36)}`;
     const timeoutMs = options.settingsAckTimeoutMs ?? DEFAULT_SETTINGS_ACK_TIMEOUT_MS;
     // The QUIC handshake must complete before we exchange HTTP/3 SETTINGS —
     // until it resolves the connection is unprotected and frames must not be
