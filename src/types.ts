@@ -18,6 +18,8 @@
  *     QUIC handles flow control, reset, and liveness.
  */
 
+import type { RandomSource } from "@browsercore/transport";
+
 // ---------------------------------------------------------------------------
 // Domain primitives
 // ---------------------------------------------------------------------------
@@ -281,4 +283,10 @@ export interface Http3Options {
     readonly initialSettings?: Http3SettingsMap;
     /** Timeout for receiving the peer's SETTINGS ACK. Default 5000ms. */
     readonly settingsAckTimeoutMs?: number;
+    /**
+     * Randomness source for connection id and nonce generation.
+     * Defaults to `nodeRandomSource` (node:crypto.randomBytes) when omitted.
+     * Inject a deterministic source for reproducible ids (e.g. test vectors).
+     */
+    readonly random?: RandomSource;
 }
