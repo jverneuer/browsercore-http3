@@ -3,12 +3,16 @@
  *
  * Prefixed integers (RFC 7541 §5.1): an N-bit prefix where values below
  * 2^N − 1 fit in the prefix, and larger values spill into 7-bit continuation
- * bytes. String literals (RFC 7541 §5.2) carry an H flag (Huffman); this
- * implementation always encodes with H=0 (raw bytes — Huffman is optional per
- * RFC 9204) and decodes H=0 literals.
+ * bytes. String literals (RFC 7541 §5.2) carry an H flag (Huffman): H=1 means
+ * the bytes are Huffman-coded with the static RFC 7541 Appendix B table (reused
+ * by QPACK, RFC 9204 §2.1.3), H=0 means raw octets.
+ *
+ * The encoder emits H=1 (Huffman) by default — that is what real servers
+ * produce, and it is almost always smaller. The decoder accepts both forms.
  */
 
 import { QpackDecodeError } from "../errors.js";
+import { HUFFMAN_TABLE } from "./huffman-table.js";
 
 /** Byte-oriented writer that accumulates wire bytes. */
 export class ByteWriter {
@@ -66,6 +70,70 @@ export class ByteReader {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Huffman coding (RFC 7541 Appendix B, reused by QPACK RFC 9204 §2.1.3)
+// ---------------------------------------------------------------------------
+
+/** Encode raw octets into a Huffman bitstring (MSB-first), padded with 1-bits. */
+export function huffmanEncode(input: Uint8Array): Uint8Array {
+    let buffer = 0;
+    let bitsInBuffer = 0;
+    const out: number[] = [];
+    for (const byte of input) {
+        const row = HUFFMAN_TABLE[byte];
+        if (row === undefined) {
+            throw new QpackDecodeError(`huffman encode: invalid byte value ${byte}`);
+        }
+        buffer = (buffer << row.bits) | row.code;
+        bitsInBuffer += row.bits;
+        while (bitsInBuffer >= 8) {
+            bitsInBuffer -= 8;
+            out.push((buffer >>> bitsInBuffer) & 0xff);
+        }
+    }
+    if (bitsInBuffer > 0) {
+        const padBits = 8 - bitsInBuffer;
+        const padding = (1 << padBits) - 1;
+        out.push(((buffer << padBits) | padding) & 0xff);
+    }
+    return Uint8Array.from(out);
+}
+
+/** Decode a Huffman-coded string of `length` octets from the reader. */
+export function huffmanDecode(reader: ByteReader, length: number): string {
+    let bitBuffer = 0;
+    let bitsAvailable = 0;
+    let remaining = length;
+    const chars: number[] = [];
+    while (remaining > 0 || bitsAvailable > 0) {
+        while (bitsAvailable < 30 && remaining > 0) {
+            bitBuffer = bitBuffer * 256 + reader.read();
+            bitsAvailable += 8;
+            remaining -= 1;
+        }
+        let matched = false;
+        for (const row of HUFFMAN_TABLE) {
+            if (row.bits > bitsAvailable) { continue; }
+            const shift = bitsAvailable - row.bits;
+            const top = Math.floor(bitBuffer / 2 ** shift) % (2 ** row.bits);
+            if (top === row.code) {
+                chars.push(row.symbol);
+                bitsAvailable = shift;
+                bitBuffer = bitsAvailable > 0 ? bitBuffer % (2 ** bitsAvailable) : 0;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) { throw new QpackDecodeError("huffman decode: no matching code"); }
+        if (remaining === 0) {
+            const mod = bitsAvailable > 0 ? 2 ** bitsAvailable : 1;
+            if (bitBuffer % mod === mod - 1) { break; }
+        }
+    }
+    return new TextDecoder().decode(Uint8Array.from(chars));
+}
+
 /**
  * Write a prefixed integer with an N-bit prefix (2 ≤ N ≤ 8).
  * `prefixBits` is the number of low bits of the first byte used for the value.
@@ -106,11 +174,12 @@ export function readPrefixedInt(reader: ByteReader, prefixBits: number): number 
     return value;
 }
 
-/** Write a string literal with H=0 (raw bytes, no Huffman). */
+/** Write a string literal with Huffman coding (H=1). */
 export function writeStringLiteral(writer: ByteWriter, str: string): void {
-    const encoded = new TextEncoder().encode(str);
-    // H=0 in the high bit; the 7-bit prefix holds the length.
-    writePrefixedInt(writer, encoded.length, 7);
+    const raw = new TextEncoder().encode(str);
+    const encoded = huffmanEncode(raw);
+    // H=1 in the high bit (base 0x80); the 7-bit prefix holds the length.
+    writePrefixedIntWithBase(writer, 0x80, encoded.length, 7);
     writer.writeBytes(encoded);
 }
 
@@ -170,16 +239,15 @@ export function readTaggedStringLiteral(reader: ByteReader, n: number): string {
         } while ((byte & 0x80) !== 0);
     }
     if (huffman) {
-        throw new QpackDecodeError("Huffman-encoded string literal unsupported");
+        return huffmanDecode(reader, length);
     }
     const bytes = reader.readBytes(length);
     return new TextDecoder().decode(bytes);
 }
 
 /**
- * Read a string literal. Supports H=0 (raw). Throws QpackDecodeError on H=1
- * (Huffman), which this implementation does not encode and does not support
- * decoding (Huffman is optional per RFC 9204).
+ * Read a string literal. The high bit of the 7-bit length prefix is the
+ * Huffman flag: H=0 raw octets, H=1 Huffman-coded. Returns the decoded string.
  */
 export function readStringLiteral(reader: ByteReader): string {
     const first = reader.read();
@@ -197,7 +265,7 @@ export function readStringLiteral(reader: ByteReader): string {
         } while ((byte & 0x80) !== 0);
     }
     if (huffman) {
-        throw new QpackDecodeError("Huffman-encoded string literal unsupported");
+        return huffmanDecode(reader, length);
     }
     const bytes = reader.readBytes(length);
     return new TextDecoder().decode(bytes);

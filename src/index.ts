@@ -19,6 +19,7 @@ export {
 
 export {
     Http3FrameType,
+    isGreaseFrameType,
     type BaseHttp3Frame,
     type Http3Frame,
     type Http3FrameOfType,

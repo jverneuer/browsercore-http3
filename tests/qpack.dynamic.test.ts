@@ -272,12 +272,13 @@ describe("QpackDecoder — post-base + literal-literal success paths", () => {
     });
 
     it("decodes a literal name reference to the static table", () => {
-        // 0 1 N T=1 <NameIdx 4+>: reference to static index 1 (:path).
-        // 0x40 | 0x20 | 1 = 0x61. Value "x" -> 0x01 0x78.
+        // 0 1 N T <NameIdx 4+>: reference to static index 1 (:path).
+        // T=1 (static) is bit 4 (0x10); N=0, index 1 -> 0x40 | 0x10 | 1 = 0x51.
+        // Value "x" -> 0x01 0x78.
         const w = new ByteWriter();
         w.write(0x00); // RIC = 0
         w.write(0x00); // S=0, deltaBase = 0
-        w.write(0x40 | 0x20 | 1); // literal name ref, T=1 (static), index 1
+        w.write(0x40 | 0x10 | 1); // literal name ref, T=1 (static), index 1
         w.write(0x01); // value length prefix
         w.write(0x78); // value "x"
         const dec = new QpackDecoder();

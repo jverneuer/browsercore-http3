@@ -73,6 +73,9 @@ export class Http3ConnectionImpl implements Http3Connection {
     /** Next client-initiated (even) bidirectional stream id. */
     private nextStreamId = 0n;
 
+    /** Queue of pending push response promises (pushPromise already fired, push() not yet called). */
+    private pendingPushes: Promise<Http3Response>[] = [];
+
     /** Set once the connection begins graceful shutdown (GOAWAY sent/received). */
     private closing = false;
     /** Set once the connection is fully torn down. */
@@ -94,6 +97,9 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.manager.setHeaderDecoder((block) => this.decodeHeaders(block));
         this.manager.on("goaway", (lastStreamId: bigint) => {
             this.onPeerGoaway(lastStreamId);
+        });
+        this.manager.on("pushPromise", (pushId: bigint) => {
+            this.onPushPromise(pushId);
         });
     }
 
@@ -135,6 +141,34 @@ export class Http3ConnectionImpl implements Http3Connection {
         });
         this.startBidiReadLoop(stream, streamId);
         return promise;
+    }
+
+    /**
+     * Accept a server push: register a push resolver and read the pushed
+     * response from the push stream the server opened.
+     *
+     * Handles the race where the pushPromise event already fired before
+     * push() was called: the resolver is registered and the promise queued
+     * in onPushPromise, so push() can drain it immediately. Otherwise push()
+     * waits for the next event.
+     */
+    public push(): Promise<Http3Response> {
+        // If a pushPromise event already fired (race: event emitted before
+        // push() was called), drain the already-queued promise. Otherwise
+        // wait for the next event — onPushPromise will queue a promise that
+        // the listener below dequeues.
+        const queued = this.pendingPushes.shift();
+        if (queued !== undefined) {
+            return queued;
+        }
+        return new Promise<Http3Response>((resolve) => {
+            this.manager.once("pushPromise", () => {
+                const p = this.pendingPushes.shift();
+                if (p !== undefined) {
+                    resolve(p);
+                }
+            });
+        });
     }
 
     public goaway(streamId: bigint): Promise<void> {
@@ -344,6 +378,52 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.closing = true;
         // Reject streams opened after lastStreamId.
         this.manager.abortAll(new GoawayReceivedError(lastStreamId));
+    }
+
+    /**
+     * Handle a server push promise: register the push resolver immediately
+     * (so a later CANCEL_PUSH can reject it), then accept the push stream
+     * and start reading pushed response frames. The resulting promise is
+     * queued so the next push() call can drain it — this handles the race
+     * where pushPromise fires before push() is awaited.
+     */
+    private onPushPromise(pushId: bigint): void {
+        // Register the resolver with the stream manager so the push can be
+        // rejected by CANCEL_PUSH before push() is ever called.
+        const promise = new Promise<Http3Response>((resolve, reject) => {
+            this.manager.expectPush(pushId, resolve, reject);
+        });
+        this.pendingPushes.push(promise);
+        // Accept the push stream the server opened for this push id and
+        // start reading pushed response frames. If the connection closes
+        // before the push stream arrives, the accept rejects — swallow it
+        // (the push resolver is already rejected by abortAll in close()).
+        void this.quic.acceptUnidirectionalStream()
+            .then((stream) => this.startPushReadLoop(stream, pushId))
+            .catch(() => {});
+    }
+
+    /** Read pushed response frames from a push stream. */
+    private async startPushReadLoop(stream: QuicStream, pushId: bigint): Promise<void> {
+        // Push streams begin with their stream-type byte (0x1); consume it
+        // before parsing frames (RFC 9114 §6.2).
+        await stream.read();
+        const reader = new FrameReader(async () => {
+            const chunk = await stream.read();
+            return chunk;
+        });
+        void (async () => {
+            try {
+                for (;;) {
+                    // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
+                    const frame = await reader.readFrame();
+                    this.manager.dispatchPushFrame(pushId, frame);
+                }
+            } catch {
+                // Push stream closed / error — the manager's push resolver
+                // either already resolved or was rejected by cancelPush.
+            }
+        })();
     }
 }
 
