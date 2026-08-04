@@ -68,11 +68,12 @@ export {
     type Http3Options,
     type Http3Request,
     type Http3Response,
-    type Http3StreamId,
+    type Logger,
     type QuicConnection,
     type QuicCloseReason,
     type QuicStream,
 } from "./types.js";
+export { silentLogger, devLogger } from "./types.js";
 
 export { decodeVarint, encodeVarint, getVarintEncodedLength } from "./frame/varint.js";
 export type { DecodedVarint } from "./frame/varint.js";

@@ -43,7 +43,7 @@ import type { RandomSource } from "@browsercore/transport";
 import { nodeRandomSource } from "@browsercore/transport";
 import {
     Http3FrameType,
-    Http3Settings,
+    silentLogger,
     type Bytes,
     type ConnectionId,
     type Http3Connection,
@@ -52,7 +52,7 @@ import {
     type Http3Request,
     type Http3Response,
     type Http3SettingsMap,
-    type Http3StreamId,
+    type Logger,
     type QuicConnection,
     type QuicStream,
 } from "./types.js";
@@ -96,6 +96,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private readonly qpackDec: QpackDecoder;
     private readonly qpackEnc: QpackEncoder;
     private readonly manager: ReturnType<typeof createStreamManager> & EventEmitter;
+    private readonly logger: Logger;
 
     /** Our control + QPACK streams (written to). */
     private controlStream: QuicStream | undefined;
@@ -117,7 +118,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.id = id;
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
-        this.qpackEnc = new QpackEncoder();
+        this.logger = options.logger ?? silentLogger;
         this.qpackDec = new QpackDecoder();
         // Apply our advertised QPACK max capacity to both codec sides. Our
         // advertised capacity is a safe initial bound for the encoder (the peer
@@ -251,6 +252,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         if (this.closed) {
             return;
         }
+        this.logger.debug("closing connection", { id: this.id });
         this.closing = true;
         await this.sendGoaway(this.nextStreamId);
         this.manager.abortAll(new ConnectionClosedError());
@@ -572,6 +574,10 @@ export class Http3ConnectionImpl implements Http3Connection {
             const onSettings = (): void => {
                 clearTimeout(timer);
                 this.manager.off("settings", onSettings);
+                this.logger.debug("SETTINGS handshake complete", {
+                    id: this.id,
+                    settings: this.settings,
+                });
                 resolve();
             };
             this.manager.once("settings", onSettings);
@@ -580,6 +586,7 @@ export class Http3ConnectionImpl implements Http3Connection {
 
     private onPeerGoaway(lastStreamId: Http3StreamId): void {
         this.closing = true;
+        this.logger.warn("peer sent GOAWAY", { id: this.id, lastStreamId: String(lastStreamId) });
         // Reject streams opened after lastStreamId.
         this.manager.abortAll(new GoawayReceivedError(lastStreamId));
     }
