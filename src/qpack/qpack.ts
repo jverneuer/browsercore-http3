@@ -152,14 +152,48 @@ export function decodeHeaders(buf: Bytes): ReadonlyMap<string, string> {
 export class QpackEncoder {
     private readonly table = new QpackDynamicTable(0);
 
-    /** Apply SETTINGS_QPACK_MAX_TABLE_CAPACITY from the peer. */
+    /**
+     * Apply SETTINGS_QPACK_MAX_TABLE_CAPACITY from the peer. Updates the
+     * encoder's dynamic-table capacity in place. Does NOT emit a Set Capacity
+     * instruction — callers that need to resync the peer's decoder should use
+     * {@link setEncoderCapacity} instead.
+     */
     public applyMaxCapacity(maxCapacity: number): void {
         this.table.setCapacity(maxCapacity);
+    }
+
+    /**
+     * Set the dynamic table capacity and emit the corresponding
+     * Set Dynamic Table Capacity encoder instruction (RFC 9204 §4.3.1).
+     * The instruction bytes must be written to the QPACK encoder stream.
+     * Wire format: 001 <Capacity 5+> (top 3 bits = 0b001 → base 0x20).
+     */
+    public setEncoderCapacity(capacity: number): Bytes {
+        this.table.setCapacity(capacity);
+        const writer = new ByteWriter();
+        writePrefixedIntWithBase(writer, 0x20, capacity, 5);
+        return writer.toBytes();
+    }
+
+    /**
+     * Emit a Set Dynamic Table Capacity instruction for the current capacity
+     * without changing it. Used to resync the decoder after the peer's
+     * SETTINGS_QPACK_MAX_TABLE_CAPACITY is applied.
+     */
+    public emitSetDynamicTableCapacity(): Bytes {
+        const writer = new ByteWriter();
+        writePrefixedIntWithBase(writer, 0x20, this.table.capacity, 5);
+        return writer.toBytes();
     }
 
     /** Total entries inserted over the lifetime (Insert Count). */
     public get insertCount(): number {
         return this.table.insertCount;
+    }
+
+    /** Current dynamic-table capacity. */
+    public get capacity(): number {
+        return this.table.capacity;
     }
 
     /** Encode a header block. */
@@ -342,35 +376,102 @@ export class QpackDecoder {
         return { name: entry.name, value };
     }
 
+    /** Number of inserts received since the last Insert Count Increment was emitted. */
+    public get pendingAcknowledges(): number {
+        return this.pendingInserts;
+    }
+
     /** Consume encoder-stream bytes: apply Set capacity / Insert / Duplicate. */
     public consumeEncoderStream(buf: Bytes): void {
         const reader = new ByteReader(buf);
+        const before = this.table.insertCount;
         while (reader.remaining > 0) {
             readEncoderInstruction(reader, this.table);
         }
-        this.pendingInserts += this.table.insertCount;
+        this.pendingInserts += this.table.insertCount - before;
     }
 
-    /** Emit an Insert Count Increment instruction for received inserts. */
+    /**
+     * Emit an Insert Count Increment instruction for received inserts.
+     * Wire format (RFC 9204 §4.4.3): 1 <Increment 6+>. The high bit (0x80)
+     * marks this as an Insert Count Increment; the low 6 bits of the first
+     * byte carry the increment value (multi-byte when >= 63).
+     */
     public emitInsertCountIncrement(): Bytes {
         const writer = new ByteWriter();
-        writePrefixedInt(writer, this.pendingInserts, 6);
+        writePrefixedIntWithBase(writer, 0x80, this.pendingInserts, 6);
         this.pendingInserts = 0;
         return writer.toBytes();
     }
 
-    /** Emit a Section Acknowledgment instruction for a stream. */
+    /**
+     * Emit a Section Acknowledgment instruction for a stream.
+     * Wire format (RFC 9204 §4.4.1): 0 0 <Stream ID 7+>.
+     */
     public emitSectionAcknowledgment(streamId: bigint): Bytes {
         const writer = new ByteWriter();
         writePrefixedInt(writer, Number(streamId), 7);
         return writer.toBytes();
     }
 
-    /** Emit a Stream Cancellation instruction for a stream. */
+    /**
+     * Emit a Stream Cancellation instruction for a stream.
+     * Wire format (RFC 9204 §4.4.2): 0 1 <Stream ID 6+>. The `01` tag in
+     * the high two bits marks this as a Stream Cancellation; the low 6 bits
+     * of the first byte carry the stream id (multi-byte when >= 63).
+     */
     public emitStreamCancellation(streamId: bigint): Bytes {
         const writer = new ByteWriter();
-        writePrefixedInt(writer, Number(streamId), 6);
+        writePrefixedIntWithBase(writer, 0x40, Number(streamId), 6);
         return writer.toBytes();
+    }
+
+    /**
+     * Cumulative count of encoder inserts the peer's decoder has
+     * acknowledged via Insert Count Increment instructions. The encoder
+     * uses this to bound memory for unacked inserts (flow control).
+     */
+    private acknowledgedInserts = 0;
+
+    /** Number of encoder inserts the peer has acknowledged. */
+    public get acknowledgedInsertCount(): number {
+        return this.acknowledgedInserts;
+    }
+
+    /**
+     * Consume decoder-stream bytes from the peer. Parses Section
+     * Acknowledgment, Stream Cancellation, and Insert Count Increment
+     * instructions (RFC 9204 §4.4). Returns the acknowledged stream ids,
+     * cancelled stream ids, and the total Insert Count Increment so the
+     * connection can update its encoder bookkeeping.
+     */
+    public consumeDecoderStream(buf: Bytes): {
+        acknowledgedStreams: bigint[];
+        cancelledStreams: bigint[];
+        insertCountIncrement: number;
+    } {
+        const reader = new ByteReader(buf);
+        const acknowledgedStreams: bigint[] = [];
+        const cancelledStreams: bigint[] = [];
+        let insertCountIncrement = 0;
+        while (reader.remaining > 0) {
+            const first = reader.peek();
+            if ((first & 0xc0) === 0x00) {
+                // 0 0 <Stream ID 7+> Section Acknowledgment (§4.4.1).
+                const streamId = readPrefixedInt(reader, 7);
+                acknowledgedStreams.push(BigInt(streamId));
+            } else if ((first & 0xc0) === 0x40) {
+                // 0 1 <Stream ID 6+> Stream Cancellation (§4.4.2).
+                const streamId = readPrefixedInt(reader, 6);
+                cancelledStreams.push(BigInt(streamId));
+            } else {
+                // 1 <Increment 6+> Insert Count Increment (§4.4.3).
+                const increment = readPrefixedInt(reader, 6);
+                insertCountIncrement += increment;
+                this.acknowledgedInserts += increment;
+            }
+        }
+        return { acknowledgedStreams, cancelledStreams, insertCountIncrement };
     }
 }
 

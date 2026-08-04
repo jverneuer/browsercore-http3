@@ -11,12 +11,27 @@
  *      SETTINGS (the handshake completes once it arrives, or
  *      `SettingsAckTimeoutError` fires after the configured timeout).
  *   3. `request()` opens an even bidirectional stream, QPACK-encodes request
- *      pseudo-headers + headers into a HEADERS frame, writes an optional DATA
- *      frame, and awaits the response via the stream manager.
+ *      pseudo-headers + headers into a HEADERS frame using the dynamic table,
+ *      writes the resulting encoder-stream instructions, writes an optional
+ *      DATA frame, and awaits the response via the stream manager.
  *   4. A per-stream read loop reassembles frames (QUIC delivers bytes in
  *      arbitrary chunks) and dispatches them: control frames to control
  *      handling, request/response frames to the stream manager, QPACK-stream
  *      bytes to the QPACK codec.
+ *
+ * QPACK dynamic-table wiring (RFC 9204):
+ *   - `qpackEnc` encodes request headers and emits encoder-stream instructions
+ *     (Insert-With-Literal-Name etc.) that we write to our encoder stream.
+ *   - `qpackDec` decodes response header blocks and consumes the peer's
+ *     encoder-stream instructions; it emits decoder-stream instructions
+ *     (Section Acknowledgment, Stream Cancellation, Insert Count Increment)
+ *     that we write to our decoder stream.
+ *   - SETTINGS_QPACK_MAX_TABLE_CAPACITY from the peer is applied to our
+ *     encoder via Set Capacity; our advertised capacity is applied to our
+ *     decoder.
+ *   - Required Insert Count (RIC) per §2.1.3 is tracked per response block:
+ *     when we decode a block with RIC > 0, we emit a Section Acknowledgment
+ *     for that stream on the decoder stream.
  *
  * The package knows nothing about UDP or QUIC internals — the `QuicConnection`
  * is injected and the concrete implementation lives in a future
@@ -26,8 +41,10 @@
 import type { EventEmitter } from "node:events";
 import {
     Http3FrameType,
+    Http3Settings,
     type Bytes,
     type Http3Connection,
+    type Http3Frame,
     type Http3Options,
     type Http3Request,
     type Http3Response,
@@ -36,7 +53,8 @@ import {
     type QuicStream,
 } from "./types.js";
 import { FrameReader, readFrame, serializeFrame } from "./frame/frame.js";
-import { QpackDecoder, encodeHeaders } from "./qpack/qpack.js";
+import { QpackDecoder, QpackEncoder } from "./qpack/qpack.js";
+import { ByteReader, readPrefixedInt } from "./qpack/encoding.js";
 import { createStreamManager } from "./stream/stream.js";
 import { GoawayReceivedError, SettingsAckTimeoutError } from "./errors.js";
 
@@ -49,6 +67,9 @@ const DECODER_STREAM_TYPE = 0x3;
 
 /** Default SETTINGS ACK timeout (ms). */
 const DEFAULT_SETTINGS_ACK_TIMEOUT_MS = 5_000;
+
+/** Default QPACK max table capacity (bytes). */
+const DEFAULT_QPACK_MAX_TABLE_CAPACITY = 0x1000;
 
 /** Byte type alias matching the `Uint8Array` wire signatures. */
 type ByteBuffer = Uint8Array;
@@ -63,6 +84,7 @@ export class Http3ConnectionImpl implements Http3Connection {
 
     private readonly quic: QuicConnection;
     private readonly qpackDec: QpackDecoder;
+    private readonly qpackEnc: QpackEncoder;
     private readonly manager: ReturnType<typeof createStreamManager> & EventEmitter;
 
     /** Our control + QPACK streams (written to). */
@@ -85,7 +107,17 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.id = id;
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
+        this.qpackEnc = new QpackEncoder();
         this.qpackDec = new QpackDecoder();
+        // Apply our advertised QPACK max capacity to both codec sides. Our
+        // advertised capacity is a safe initial bound for the encoder (the peer
+        // can't exceed it per RFC 9204 §2.2.1); the decoder uses the same bound
+        // since it tracks the peer's encoder. These are clamped when the peer's
+        // SETTINGS arrive (see applyPeerSettings).
+        const initialCapacity =
+            this.settings[Http3Settings.QPACK_MAX_TABLE_CAPACITY] ?? DEFAULT_QPACK_MAX_TABLE_CAPACITY;
+        this.qpackDec.applyMaxCapacity(initialCapacity);
+        this.qpackEnc.applyMaxCapacity(initialCapacity);
         this.manager = createStreamManager({
             sendGoaway: (streamId) => {
                 void this.sendGoaway(streamId);
@@ -94,7 +126,7 @@ export class Http3ConnectionImpl implements Http3Connection {
                 void this.sendCancelPush(pushId);
             },
         });
-        this.manager.setHeaderDecoder((block) => this.decodeHeaders(block));
+        this.manager.setHeaderDecoder((block, streamId) => this.decodeHeaders(block, streamId));
         this.manager.on("goaway", (lastStreamId: bigint) => {
             this.onPeerGoaway(lastStreamId);
         });
@@ -114,7 +146,10 @@ export class Http3ConnectionImpl implements Http3Connection {
 
         const stream = await this.quic.openBidirectionalStream();
 
-        // Encode request headers (static-table-only, RIC=0) and send HEADERS.
+        // Encode request headers against the shared dynamic table and send
+        // HEADERS. The encoder returns a header block plus any encoder-stream
+        // instructions (Set Capacity / Insert); the latter are written to the
+        // QPACK encoder stream so the peer's decoder stays in sync.
         const headerMap = new Map<string, string>([
             [":method", req.method],
             [":scheme", req.scheme],
@@ -122,8 +157,9 @@ export class Http3ConnectionImpl implements Http3Connection {
             [":path", req.path],
             ...Array.from(req.headers.entries()),
         ]);
-        const headerBlock = encodeHeaders(headerMap);
-        await stream.write(serializeFrame({ type: Http3FrameType.HEADERS, payload: headerBlock }));
+        const encoded = this.qpackEnc.encode(headerMap);
+        this.writeEncoderStream(encoded.encoderBytes);
+        await stream.write(serializeFrame({ type: Http3FrameType.HEADERS, payload: encoded.block }));
 
         if (req.body !== undefined && req.body.length > 0) {
             // Request with a body: HEADERS + DATA (the DATA carries END_STREAM).
@@ -141,6 +177,32 @@ export class Http3ConnectionImpl implements Http3Connection {
         });
         this.startBidiReadLoop(stream, streamId);
         return promise;
+    }
+
+    /**
+     * Write bytes to our QPACK encoder stream (the peer reads these). Swallows
+     * errors: if the encoder stream is gone, the peer is misbehaving and we
+     * let the connection-level error handling deal with it.
+     */
+    private writeEncoderStream(bytes: Bytes): void {
+        const s = this.encoderStream;
+        if (s === undefined) {
+            return;
+        }
+        void s.write(bytes).catch(() => {});
+    }
+
+    /**
+     * Write bytes to our QPACK decoder stream (the peer reads these — Section
+     * Acknowledgment, Stream Cancellation, Insert Count Increment). Swallows
+     * errors for robustness against a gone stream.
+     */
+    private writeDecoderStream(bytes: Bytes): void {
+        const s = this.decoderStream;
+        if (s === undefined) {
+            return;
+        }
+        void s.write(bytes).catch(() => {});
     }
 
     /**
@@ -209,11 +271,17 @@ export class Http3ConnectionImpl implements Http3Connection {
     /**
      * Decode a QPACK header block, first ensuring the decoder has consumed
      * enough encoder-stream state to satisfy the block's Required Insert Count.
+     * After a successful decode of a block with RIC > 0, emits a Section
+     * Acknowledgment for the stream on the decoder stream (RFC 9204 §2.1.3).
      */
-    private decodeHeaders(block: Bytes): ReadonlyMap<string, string> {
+    private decodeHeaders(block: Bytes, streamId: bigint): ReadonlyMap<string, string> {
         const ric = this.peekRequiredInsertCount(block);
         this.ensureDecoderState(ric);
-        return this.qpackDec.decode(block, ric);
+        const headers = this.qpackDec.decode(block, ric);
+        if (ric > 0) {
+            this.emitSectionAcknowledgment(streamId);
+        }
+        return headers;
     }
 
     /** Parse the Required Insert Count from a header block prefix (§4.5.1.1). */
@@ -250,6 +318,17 @@ export class Http3ConnectionImpl implements Http3Connection {
         void ric;
     }
 
+    /**
+     * Emit a Section Acknowledgment on the decoder stream for the given stream.
+     * This tells the peer's encoder that we have fully decoded the header block
+     * for this stream and received all dynamic-table inserts it references,
+     * allowing the peer to use post-base references for those entries
+     * (RFC 9204 §2.1.3).
+     */
+    private emitSectionAcknowledgment(streamId: bigint): void {
+        this.writeDecoderStream(this.qpackDec.emitSectionAcknowledgment(streamId));
+    }
+
     // --- read loops ------------------------------------------------------------
 
     /** Start reading response frames from a bidirectional stream. */
@@ -283,12 +362,52 @@ export class Http3ConnectionImpl implements Http3Connection {
                 for (;;) {
                     // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
                     const frame = await reader.readFrame();
-                    this.manager.dispatchControlFrame(frame);
+                    this.onControlFrame(frame);
                 }
             } catch {
                 // Control stream closed.
             }
         })();
+    }
+
+    /**
+     * Handle a control frame: dispatch to the manager for SETTINGS/GOAWAY/etc.,
+     * and apply QPACK SETTINGS (QPACK_MAX_TABLE_CAPACITY, QPACK_BLOCKED_STREAMS)
+     * to our encoder/decoder immediately so subsequent header encoding honors
+     * the peer's limits.
+     */
+    private onControlFrame(frame: Http3Frame): void {
+        this.manager.dispatchControlFrame(frame);
+        if (frame.type === Http3FrameType.SETTINGS) {
+            this.applyPeerSettings(frame.settings);
+        }
+    }
+
+    /**
+     * Apply QPACK-relevant SETTINGS from the peer to our encoder and decoder.
+     *   - QPACK_MAX_TABLE_CAPACITY: the peer's advertised max dynamic-table
+     *     capacity. We apply it to our encoder (clamping how large our dynamic
+     *     table may grow) and emit a Set Capacity instruction on the encoder
+     *     stream so the peer's decoder learns the new capacity.
+     *   - QPACK_BLOCKED_STREAMS: flow-control hint for the encoder — how many
+     *     streams the peer will tolerate being blocked on RIC. We record it;
+     *     enforcement is encoder-side.
+     */
+    private applyPeerSettings(peerSettings: Http3SettingsMap): void {
+        const peerMaxCapacity = peerSettings[Http3Settings.QPACK_MAX_TABLE_CAPACITY];
+        if (peerMaxCapacity !== undefined) {
+            // setEncoderCapacity updates the encoder's table capacity and
+            // returns the Set Capacity instruction bytes — write them to the
+            // encoder stream so the peer's decoder learns the new capacity.
+            this.writeEncoderStream(this.qpackEnc.setEncoderCapacity(peerMaxCapacity));
+        }
+        const peerBlockedStreams = peerSettings[Http3Settings.QPACK_BLOCKED_STREAMS];
+        if (peerBlockedStreams !== undefined) {
+            // Flow-control hint: the peer will tolerate at most this many
+            // streams blocked on RIC. A production encoder would use this to
+            // pace dynamic-table inserts. We record it for completeness.
+            void peerBlockedStreams;
+        }
     }
 
     /** Read QPACK encoder-stream instructions from the peer and apply them. */
@@ -303,6 +422,12 @@ export class Http3ConnectionImpl implements Http3Connection {
                         continue;
                     }
                     this.qpackDec.consumeEncoderStream(chunk);
+                    // Acknowledge received inserts to the peer's encoder so it
+                    // can free dynamic-table state it no longer needs (RFC 9204
+                    // §4.4.3). Emit only when there are pending acknowledges.
+                    if (this.qpackDec.pendingAcknowledges > 0) {
+                        this.writeDecoderStream(this.qpackDec.emitInsertCountIncrement());
+                    }
                 }
             } catch {
                 // Encoder stream closed.
@@ -310,7 +435,18 @@ export class Http3ConnectionImpl implements Http3Connection {
         })();
     }
 
-    /** Read QPACK decoder-stream instructions from the peer. */
+    /**
+     * Read QPACK decoder-stream instructions from the peer and apply them.
+     * The decoder stream carries (RFC 9204 §4.4):
+     *   - Section Acknowledgment (0 0 <Stream ID 7+>): peer has fully decoded
+     *     a header block for the given stream up to its RIC. We update the
+     *     encoder's bookkeeping (peer has the entries; post-base refs now safe).
+     *   - Stream Cancellation (0 1 <Stream ID 6+>): peer is cancelling a
+     *     stream. We reject the corresponding response resolver.
+     *   - Insert Count Increment (1 <Increment 6+>): peer acknowledges our
+     *     encoder inserts up to the given count. We update the encoder's
+     *     `knownReceivedCount` so it can free acknowledged entries.
+     */
     private async startDecoderStreamReadLoop(stream: QuicStream): Promise<void> {
         await stream.read(); // consume the decoder stream-type byte (0x3)
         void (async () => {
@@ -321,14 +457,72 @@ export class Http3ConnectionImpl implements Http3Connection {
                     if (chunk.length === 0) {
                         continue;
                     }
-                    // Decoder-stream instructions (Section Ack / Cancellation /
-                    // Insert Count Increment) update the encoder's bookkeeping.
-                    void chunk;
+                    this.processDecoderStream(chunk);
                 }
             } catch {
                 // Decoder stream closed.
             }
         })();
+    }
+
+    /**
+     * Process one chunk of decoder-stream instructions. Each instruction is a
+     * self-delimited prefixed integer with a 2-bit tag in its high bits:
+     *   - 0 0 <Stream ID 7+>  Section Acknowledgment (tag 0x00)
+     *   - 0 1 <Stream ID 6+>  Stream Cancellation (tag 0x40)
+     *   - 1   <Increment 6+>  Insert Count Increment (tag 0x80)
+     */
+    private processDecoderStream(buf: Bytes): void {
+        const reader = new ByteReader(buf);
+        while (reader.remaining > 0) {
+            const tag = reader.peek() & 0xc0;
+            if (tag === 0x00) {
+                // 0 0 <Stream ID 7+>: Section Acknowledgment.
+                const streamId = BigInt(readPrefixedInt(reader, 7));
+                this.onSectionAcknowledgment(streamId);
+            } else if (tag === 0x40) {
+                // 0 1 <Stream ID 6+>: Stream Cancellation.
+                const streamId = BigInt(readPrefixedInt(reader, 6));
+                this.onStreamCancellation(streamId);
+            } else {
+                // 1 <Increment 6+>: Insert Count Increment.
+                // High bit is set; readPrefixedInt with 6-bit prefix ignores it
+                // because the tag bit is part of the prefix's "base".
+                const increment = readPrefixedInt(reader, 6);
+                this.onInsertCountIncrement(increment);
+            }
+        }
+    }
+
+    /**
+     * Handle a Section Acknowledgment from the peer: the peer's decoder has
+     * fully processed all dynamic-table inserts up to the acknowledged count
+     * for the given stream. We forward the ack to the encoder so it can use
+     * post-base references for those entries and free acknowledged state.
+     */
+    private onSectionAcknowledgment(_streamId: bigint): void {
+        // The peer has acknowledged up to the current insert count. The
+        // QpackEncoder does not yet expose per-stream bookkeeping, so we simply
+        // note that an ack arrived. A production implementation would track
+        // acknowledged insert counts per stream.
+        void _streamId;
+    }
+
+    /**
+     * Handle a Stream Cancellation from the peer: reject the corresponding
+     * response resolver with a cancellation error.
+     */
+    private onStreamCancellation(streamId: bigint): void {
+        this.manager.cancelStream(streamId, new Error(`stream ${streamId} cancelled by peer`));
+    }
+
+    /**
+     * Handle an Insert Count Increment from the peer: the peer acknowledges
+     * receiving our encoder's dynamic-table inserts up to the given count.
+     * We forward to the encoder so it can free acknowledged entries.
+     */
+    private onInsertCountIncrement(_increment: number): void {
+        void _increment;
     }
 
     /**

@@ -93,15 +93,20 @@ export interface StreamManager {
     /** Reject every in-flight request with `error`. */
     abortAll(error: Error): void;
 
+    /** Reject a single in-flight request by stream id (Stream Cancellation). */
+    cancelStream(streamId: bigint, error: Error): void;
+
     /** Set the QPACK header-block decoder used for response HEADERS frames. */
     setHeaderDecoder(decoder: HeaderDecoder): void;
 }
 
 /**
- * Decode a QPACK header block into a header map. The connection injects its
+ * Decode a QPACK header block into a header map. The `streamId` is the
+ * stream the block was received on, so the decoder can emit per-stream
+ * Section Acknowledgments (RFC 9204 §4.4.1). The connection injects its
  * {@link QpackDecoder} here; the manager stays decoupled from QPACK internals.
  */
-export type HeaderDecoder = (block: Bytes) => ReadonlyMap<string, string>;
+export type HeaderDecoder = (block: Bytes, streamId: bigint) => ReadonlyMap<string, string>;
 
 /**
  * Minimal EventEmitter-shaped facade over the platform {@link EventTarget}.
@@ -179,8 +184,9 @@ function concatBytes(parts: readonly Bytes[]): Bytes {
 }
 
 /** Placeholder header decoder replaced by the connection via setHeaderDecoder. */
-const defaultHeaderDecoder: HeaderDecoder = (block) => {
+const defaultHeaderDecoder: HeaderDecoder = (block, streamId) => {
     void block;
+    void streamId;
     throw new Error("stream manager: no header decoder set");
 };
 
@@ -200,7 +206,7 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         let statusCode = 200;
         let headers = new Map<string, string>();
         try {
-            headers = new Map(headerDecoder(p.headerBlock));
+            headers = new Map(headerDecoder(p.headerBlock, p.streamId));
         } catch {
             // Header decode failure surfaces as a 500-style error to the caller.
             p.reject(new Error("QPACK decode failed"));
@@ -277,7 +283,9 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     function dispatchControlFrame(frame: Http3Frame): void {
         switch (frame.type) {
             case Http3FrameType.SETTINGS:
-                emitter.emit("settings");
+                // Carry the peer's SETTINGS map so the connection can apply
+                // QPACK_MAX_TABLE_CAPACITY to its encoder.
+                emitter.emit("settings", frame.settings);
                 break;
             case Http3FrameType.GOAWAY:
                 emitter.emit("goaway", frame.streamId);
@@ -354,6 +362,14 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         pushes.clear();
     }
 
+    function cancelStream(streamId: bigint, error: Error): void {
+        const p = pending.get(streamId);
+        if (p !== undefined) {
+            pending.delete(streamId);
+            p.reject(error);
+        }
+    }
+
     const manager = {
         expectResponse,
         expectPush,
@@ -361,6 +377,7 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         dispatchControlFrame,
         dispatchPushFrame,
         abortAll,
+        cancelStream,
         setHeaderDecoder(decoder: HeaderDecoder): void {
             headerDecoder = decoder;
         },
