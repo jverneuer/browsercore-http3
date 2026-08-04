@@ -200,7 +200,7 @@ export class QpackEncoder {
         requiredInsertCount: number;
         encoderBytes: Bytes;
     } {
-        const blockWriter = new ByteWriter();
+        const fieldsWriter = new ByteWriter();
         const encWriter = new ByteWriter();
         const base = this.table.insertCount;
         let requiredInsertCount = 0;
@@ -210,7 +210,7 @@ export class QpackEncoder {
             if (existing !== -1) {
                 // Reference the existing dynamic entry by relative index.
                 const relative = base - 1 - existing;
-                writeDynamicIndexRef(blockWriter, relative);
+                writeDynamicIndexRef(fieldsWriter, relative);
                 requiredInsertCount = Math.max(requiredInsertCount, existing + 1);
             } else {
                 // Insert by literal name on the encoder stream, then reference
@@ -218,12 +218,15 @@ export class QpackEncoder {
                 writeInsertLiteralName(encWriter, name, value);
                 this.table.insert(name, value);
                 const postBase = this.table.insertCount - base - 1;
-                writePostBaseIndexRef(blockWriter, postBase);
+                writePostBaseIndexRef(fieldsWriter, postBase);
                 requiredInsertCount = this.table.insertCount;
             }
         }
 
+        // The block prefix (RIC + Base) precedes the field lines (§4.5.1).
+        const blockWriter = new ByteWriter();
         writeBlockPrefix(blockWriter, requiredInsertCount, base);
+        blockWriter.writeBytes(fieldsWriter.toBytes());
         return {
             block: blockWriter.toBytes(),
             requiredInsertCount,
@@ -310,12 +313,46 @@ export class QpackDecoder {
     private readRepresentation(reader: ByteReader, base: number): HeaderField {
         const first = reader.peek();
         if ((first & 0x80) !== 0) {
+            // 1 T <idx 6+>: Indexed Field Line (static or dynamic).
             return this.decodeIndexed(reader, base);
         }
-        if ((first & 0x40) !== 0) {
+        if ((first & 0xc0) === 0x40) {
+            // 01 N T <idx 4+>: Literal Field Line with Name Reference.
             return this.decodeLiteralNameRef(reader, base);
         }
+        if ((first & 0xf0) === 0x10) {
+            // 0001 <idx 4+>: Indexed Field Line with Post-Base Index.
+            return this.decodePostBaseIndexed(reader, base);
+        }
+        if ((first & 0xf0) === 0x00) {
+            // 0000 N <idx 3+>: Literal Field Line with Post-Base Name Reference.
+            return this.decodePostBaseLiteralNameRef(reader, base);
+        }
+        // 001 N H <len 3+>: Literal Field Line with Literal Name.
         return decodeLiteralLiteral(reader);
+    }
+
+    /** Decode an Indexed Field Line with Post-Base Index (§4.5.3). */
+    private decodePostBaseIndexed(reader: ByteReader, base: number): HeaderField {
+        const postBase = readPrefixedInt(reader, 4);
+        const absolute = base + postBase;
+        const entry = this.table.getByAbsoluteIndex(absolute);
+        if (entry === undefined) {
+            throw new QpackDecodeError(`post-base indexed: invalid index ${postBase}`);
+        }
+        return { name: entry.name, value: entry.value };
+    }
+
+    /** Decode a Literal Field Line with Post-Base Name Reference (§4.5.5). */
+    private decodePostBaseLiteralNameRef(reader: ByteReader, base: number): HeaderField {
+        const postBase = readPrefixedInt(reader, 3);
+        const value = readStringLiteral(reader);
+        const absolute = base + postBase;
+        const entry = this.table.getByAbsoluteIndex(absolute);
+        if (entry === undefined) {
+            throw new QpackDecodeError(`post-base name ref: invalid index ${postBase}`);
+        }
+        return { name: entry.name, value };
     }
 
     /** Decode an Indexed Field Line (static or dynamic, relative to base). */
