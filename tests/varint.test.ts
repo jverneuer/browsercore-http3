@@ -7,7 +7,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { decodeVarint, encodeVarint, VARINT_MAX } from "../src/index.js";
+import { assertNever } from "../src/index.js";
+import { decodeVarint, encodeVarint, readVarintPayload, VARINT_MAX, writeVarint } from "../src/index.js";
+
+/** A varint length that the type system forbids (not 1/2/4/8). Used to exercise the assertNever default. */
+const INVALID_VARINT_LENGTH = 3 as 1 as 1 | 2 | 4 | 8;
 
 /** Boundary values: the bucket edges and the overall max. */
 const BOUNDARIES = [
@@ -123,5 +127,37 @@ describe("encodeVarint error paths", () => {
 
     it("throws RangeError above VARINT_MAX", () => {
         expect(() => encodeVarint(VARINT_MAX + 1n)).toThrow(RangeError);
+    });
+});
+
+describe("assertNever — exhaustiveness guard", () => {
+    it("throws for any value cast to never", () => {
+        // assertNever is the exhaustive-match fallback in writeVarint and
+        // readVarintPayload: the type system guarantees it is never reached,
+        // but it must still throw if somehow invoked. Proving it throws keeps
+        // the default branch from being dead code.
+        expect(() => assertNever("surprise" as never)).toThrow(/Unexpected value/);
+        expect(() => assertNever(3 as never)).toThrow(/Unexpected value/);
+        expect(() => assertNever(undefined as never)).toThrow(/Unexpected value/);
+    });
+});
+
+describe("writeVarint — exhaustiveness default", () => {
+    it("throws when called with a length the type system forbids", () => {
+        // 3 is not a valid varint length; the type system forbids this call, so
+        // we cast to exercise the assertNever guard — proving the default is a
+        // real exhaustive-match fallback, not dead code.
+        const out = new Uint8Array(3);
+        expect(() => writeVarint(out, 0n, INVALID_VARINT_LENGTH)).toThrow(/Unexpected value/);
+    });
+});
+
+describe("readVarintPayload — exhaustiveness default", () => {
+    it("throws when called with a length the type system forbids", () => {
+        // 3 is not a valid varint length; the type system forbids this call, so
+        // we cast to exercise the assertNever guard — proving the default is a
+        // real exhaustive-match fallback, not dead code.
+        const at = (_i: number): number => 0;
+        expect(() => readVarintPayload(at, INVALID_VARINT_LENGTH)).toThrow(/Unexpected value/);
     });
 });

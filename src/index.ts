@@ -65,7 +65,7 @@ export {
     type QuicStream,
 } from "./types.js";
 
-export { decodeVarint, encodeVarint, getVarintEncodedLength } from "./frame/varint.js";
+export { decodeVarint, encodeVarint, getVarintEncodedLength, readVarintPayload, writeVarint } from "./frame/varint.js";
 export type { DecodedVarint } from "./frame/varint.js";
 export { VARINT_MAX } from "./types.js";
 export type { Bytes } from "./types.js";
