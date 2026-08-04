@@ -3,29 +3,16 @@
  *
  * Scope: `src/frame/frame.ts` and `src/frame/varint.ts` only.
  *
- * The frame layer is largely unimplemented (see PLAN.md Steps 1–2): most of
- * `serializeFrame`, `readFrame`, `encodeVarint`, and `decodeVarint` are TODO
- * stubs that throw. Per the project's "test what exists" rule (see
- * http3.test.ts), this file covers:
- *
- *   - The one fully-implemented function, `getVarintEncodedLength`, with
- *     exhaustive boundary / property / error-path tests.
- *   - The TODO stubs, by asserting they throw their placeholder error — the
- *     only behaviour that currently exists — without implementing the feature.
- *   - Genuinely unimplemented features (varint wire round-trip, frame
- *     serialize/parse for every frame type, GREASE, error paths) as
- *     `it.todo` placeholders so the PLAN.md checklist keeps a 1:1 mapping to
- *     runnable tests.
- *
- * When the frame layer is implemented, the `it.todo` entries below become
- * the spec to satisfy; each names the exact assertion the implementation must
- * make.
+ * This file covers the fully-implemented `getVarintEncodedLength` with
+ * exhaustive boundary / property / error-path tests. The remaining functions
+ * (`encodeVarint`, `decodeVarint`, `serializeFrame`, `readFrame`) are
+ * implemented and covered by `tests/conn-coverage.test.ts`. Genuinely
+ * unimplemented features (GREASE, some error paths) remain as `it.todo`
+ * placeholders so the PLAN.md checklist keeps a 1:1 mapping to runnable tests.
  */
 
 import { describe, it, expect } from "vitest";
 import {
-    decodeVarint,
-    encodeVarint,
     getVarintEncodedLength,
     FrameParseError,
     Http3Error,
@@ -34,65 +21,6 @@ import {
     Http3StreamType,
     VARINT_MAX,
 } from "../src/index.js";
-import { readFrame, serializeFrame } from "../src/frame/frame.js";
-import type {
-    Http3Frame,
-    Http3DataFrame,
-    Http3HeadersFrame,
-    Http3CancelPushFrame,
-    Http3SettingsFrame,
-    Http3PushPromiseFrame,
-    Http3GoawayFrame,
-    Http3MaxPushIdFrame,
-} from "../src/types.js";
-
-// ---------------------------------------------------------------------------
-// Helpers — build typed frame objects for each variant.
-// ---------------------------------------------------------------------------
-
-function makeDataFrame(payload: Uint8Array): Http3DataFrame {
-    return { type: Http3FrameType.DATA, payload };
-}
-
-function makeHeadersFrame(payload: Uint8Array): Http3HeadersFrame {
-    return { type: Http3FrameType.HEADERS, payload };
-}
-
-function makeCancelPushFrame(pushId: bigint): Http3CancelPushFrame {
-    return { type: Http3FrameType.CANCEL_PUSH, pushId };
-}
-
-function makeSettingsFrame(
-    settings: Http3SettingsFrame["settings"],
-): Http3SettingsFrame {
-    return { type: Http3FrameType.SETTINGS, settings };
-}
-
-function makePushPromiseFrame(
-    pushId: bigint,
-    payload: Uint8Array,
-): Http3PushPromiseFrame {
-    return { type: Http3FrameType.PUSH_PROMISE, pushId, payload };
-}
-
-function makeGoawayFrame(streamId: bigint): Http3GoawayFrame {
-    return { type: Http3FrameType.GOAWAY, streamId };
-}
-
-function makeMaxPushIdFrame(pushId: bigint): Http3MaxPushIdFrame {
-    return { type: Http3FrameType.MAX_PUSH_ID, pushId };
-}
-
-// Every frame variant — used to assert each one hits the serialize stub.
-const EVERY_FRAME: Http3Frame[] = [
-    makeDataFrame(new Uint8Array([0xde, 0xad])),
-    makeHeadersFrame(new Uint8Array([0xbe, 0xef])),
-    makeCancelPushFrame(0n),
-    makeSettingsFrame({ [Http3Settings.QPACK_MAX_TABLE_CAPACITY]: 1024 }),
-    makePushPromiseFrame(5n, new Uint8Array([0x01, 0x02])),
-    makeGoawayFrame(99n),
-    makeMaxPushIdFrame(100n),
-];
 
 // ===========================================================================
 // getVarintEncodedLength — exhaustive coverage of the implemented function.
@@ -260,61 +188,6 @@ describe("getVarintEncodedLength — error paths", () => {
         expect(() => getVarintEncodedLength(VARINT_MAX + 1_000_000n)).toThrow(
             RangeError,
         );
-    });
-});
-
-// ===========================================================================
-// TODO stubs — confirm placeholders are wired (throw their placeholder error).
-// ===========================================================================
-
-describe("TODO stubs throw their placeholder error", () => {
-    it("encodeVarint(0n) is unimplemented", () => {
-        expect(() => encodeVarint(0n)).toThrow(/TODO/);
-    });
-
-    it("encodeVarint(1n) is unimplemented", () => {
-        expect(() => encodeVarint(1n)).toThrow(/TODO/);
-    });
-
-    it("encodeVarint(VARINT_MAX) is unimplemented", () => {
-        expect(() => encodeVarint(VARINT_MAX)).toThrow(/TODO/);
-    });
-
-    it("decodeVarint on an empty buffer is unimplemented", () => {
-        expect(() => decodeVarint(new Uint8Array())).toThrow(/TODO/);
-    });
-
-    it("decodeVarint on a non-empty buffer is unimplemented", () => {
-        expect(() => decodeVarint(new Uint8Array([0x00]))).toThrow(/TODO/);
-        expect(() => decodeVarint(new Uint8Array([0xff, 0xff]))).toThrow(/TODO/);
-    });
-
-    it("serializeFrame is unimplemented for every frame variant", () => {
-        for (const frame of EVERY_FRAME) {
-            expect(() => serializeFrame(frame)).toThrow(/TODO/);
-        }
-    });
-
-    it("serializeFrame is unimplemented for a DATA frame with empty payload", () => {
-        expect(() => serializeFrame(makeDataFrame(new Uint8Array()))).toThrow(
-            /TODO/,
-        );
-    });
-
-    it("serializeFrame is unimplemented for an empty SETTINGS frame", () => {
-        expect(() => serializeFrame(makeSettingsFrame({}))).toThrow(/TODO/);
-    });
-
-    it("readFrame is unimplemented", async () => {
-        await expect(
-            readFrame(async () => new Uint8Array([0x00])),
-        ).rejects.toThrow(/TODO/);
-    });
-
-    it("readFrame is unimplemented even when the reader returns empty bytes", async () => {
-        await expect(
-            readFrame(async () => new Uint8Array()),
-        ).rejects.toThrow(/TODO/);
     });
 });
 

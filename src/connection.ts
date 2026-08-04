@@ -167,47 +167,12 @@ export class Http3ConnectionImpl implements Http3Connection {
     }
 
     /**
-     * Decode a QPACK header block, first ensuring the decoder has consumed
-     * enough encoder-stream state to satisfy the block's Required Insert Count.
+     * Decode a QPACK header block. The decoder tracks its own dynamic-table
+     * state via the encoder-stream read loop; the prefix's Required Insert
+     * Count is validated inside `QpackDecoder.decode`.
      */
     private decodeHeaders(block: Bytes): ReadonlyMap<string, string> {
-        const ric = this.peekRequiredInsertCount(block);
-        this.ensureDecoderState(ric);
-        return this.qpackDec.decode(block, ric);
-    }
-
-    /** Parse the Required Insert Count from a header block prefix (§4.5.1.1). */
-    private peekRequiredInsertCount(block: Bytes): number {
-        if (block.length === 0) {
-            return 0;
-        }
-        // RIC is an 8-bit prefixed integer in the first byte (low 7 bits + high bit).
-        const first = block[0] ?? 0;
-        let ric = first & 0x7f;
-        const max = (1 << 7) - 1;
-        if (ric === max) {
-            let m = 0;
-            for (let i = 1; i < block.length; i += 1) {
-                const b = block[i] ?? 0;
-                ric += (b & 0x7f) * (1 << m);
-                m += 7;
-                if ((b & 0x80) === 0) {
-                    break;
-                }
-            }
-        }
-        return ric;
-    }
-
-    /**
-     * Ensure the decoder's Insert Count meets `ric` by draining buffered
-     * encoder-stream bytes. For static-only blocks (RIC=0) this is a no-op.
-     */
-    private ensureDecoderState(ric: number): void {
-        // The peer's encoder stream is drained by the encoder-stream read loop;
-        // here we simply rely on it having run. For RIC>0 in dynamic-table
-        // scenarios, the read loop keeps the decoder current.
-        void ric;
+        return this.qpackDec.decode(block);
     }
 
     // --- read loops ------------------------------------------------------------
@@ -262,7 +227,7 @@ export class Http3ConnectionImpl implements Http3Connection {
                     if (chunk.length === 0) {
                         continue;
                     }
-                    this.qpackDec.consumeEncoderStream(chunk);
+                    this.qpackDec.applyEncoderInstructions(chunk);
                 }
             } catch {
                 // Encoder stream closed.

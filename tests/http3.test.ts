@@ -1,54 +1,31 @@
 /**
- * @browsercore/http3 — tests for the code that exists.
+ * @browsercore/http3 — base test file covering errors, utils, and type
+ * constants. Implementation-specific coverage lives in:
+ *   - tests/frame-coverage.test.ts (varint, frame serialize/parse)
+ *   - tests/qpack-coverage.test.ts (QPACK encoder/decoder)
+ *   - tests/conn-coverage.test.ts (connection, stream manager)
  *
- * This package is largely unimplemented (see PLAN.md): most of `src/` is
- * currently a set of TODO stubs that throw. Per the project's "test what
- * exists" rule, every existing statement / branch / function / line is covered:
- *   - Real implementations (errors, utils, getVarintEncodedLength, the stream
- *     / frame / QPACK / connection types) are exercised across their edge cases.
- *   - TODO stubs are covered by asserting they throw their placeholder error —
- *     the only behaviour that currently exists — without implementing the
- *     underlying feature.
- *
- * Genuinely unimplemented *features* (varint encode/decode wire round-trip,
- * frame serialize/parse, QPACK tables, the stream manager, the connection
- * lifecycle, GOAWAY, push, GREASE) are marked `it.todo` below so the PLAN.md
- * checklist keeps a 1:1 mapping to runnable tests. Those are listed in the final
- * report — they are intentionally not built here.
+ * Genuinely unimplemented *features* are marked `it.todo` below so the PLAN.md
+ * checklist keeps a 1:1 mapping to runnable tests.
  */
 
 import { describe, it, expect } from "vitest";
 import {
     assertNever,
-    connectHttp3,
-    createStreamManager,
-    decodeVarint,
-    encodeVarint,
     getVarintEncodedLength,
     FrameParseError,
     GoawayReceivedError,
-    Http3ConnectionImpl,
     Http3Error,
     Http3FrameType,
     Http3Settings,
     Http3StreamType,
     PushCancelledError,
     QpackDecodeError,
-    QpackDecoder,
-    QpackEncoder,
-    qpackDecodeHeaders,
-    qpackEncodeHeaders,
     SettingsAckTimeoutError,
     SettingsViolationError,
     VARINT_MAX,
 } from "../src/index.js";
-import { readFrame, serializeFrame } from "../src/frame/frame.js";
 import { concat, concatAll } from "../src/utils.js";
-import type {
-    Http3Frame,
-    Http3Request,
-    QuicConnection,
-} from "../src/types.js";
 
 // ---------------------------------------------------------------------------
 // errors.ts — every branch (with and without `cause`) of every error class.
@@ -308,60 +285,11 @@ describe("constants", () => {
 });
 
 // ---------------------------------------------------------------------------
-// TODO stubs — covered by asserting their (only) existing behaviour: throwing.
-// These confirm the placeholders are wired up without implementing them.
-// QPACK (encodeHeaders/decodeHeaders/QpackEncoder/QpackDecoder) is implemented
-// in src/qpack/ and covered by tests/qpack-coverage.test.ts, so it is excluded
-// here.
-// ---------------------------------------------------------------------------
-
-describe("TODO stubs throw their placeholder error", () => {
-    it("encodeVarint is unimplemented", () => {
-        expect(() => encodeVarint(0n)).toThrow(/TODO/);
-    });
-
-    it("decodeVarint is unimplemented", () => {
-        expect(() => decodeVarint(new Uint8Array([0]))).toThrow(/TODO/);
-    });
-
-    it("serializeFrame is unimplemented", () => {
-        const frame: Http3Frame = { type: Http3FrameType.DATA, payload: new Uint8Array() };
-        expect(() => serializeFrame(frame)).toThrow(/TODO/);
-    });
-
-    it("readFrame is unimplemented", async () => {
-        await expect(readFrame(async () => new Uint8Array([0x00]))).rejects.toThrow(/TODO/);
-    });
-
-    it("createStreamManager is unimplemented", () => {
-        expect(() => createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} })).toThrow(
-            /TODO/,
-        );
-    });
-
-    it("Http3ConnectionImpl constructor is unimplemented", () => {
-        const options = { quic: {} as unknown as QuicConnection };
-        expect(() => new Http3ConnectionImpl(options)).toThrow(/TODO/);
-    });
-
-    it("Http3ConnectionImpl instance methods are unimplemented", async () => {
-        // The constructor throws, so reach the methods via the prototype with a
-        // stub `this`. None of them touch `this`, so a bare prototype object
-        // suffices.
-        const stub = Object.create(Http3ConnectionImpl.prototype);
-        await expect(stub.request({} as unknown as Http3Request)).rejects.toThrow(/TODO/);
-        await expect(stub.goaway(0n)).rejects.toThrow(/TODO/);
-        await expect(stub.close()).rejects.toThrow(/TODO/);
-    });
-
-    it("connectHttp3 is unimplemented", async () => {
-        await expect(connectHttp3({ quic: {} as unknown as QuicConnection })).rejects.toThrow(/TODO/);
-    });
-});
-
-// ---------------------------------------------------------------------------
 // Genuinely unimplemented features — placeholders for the PLAN.md checklist.
-// These are NOT built here; they are listed in the final report.
+// Implemented features (varint, frame, QPACK, stream manager, connection) are
+// covered by tests/frame-coverage.test.ts, tests/qpack-coverage.test.ts, and
+// tests/conn-coverage.test.ts. The remaining unimplemented features are listed
+// here as `it.todo` placeholders.
 // ---------------------------------------------------------------------------
 
 describe("unimplemented features (PLAN.md checklist)", () => {
