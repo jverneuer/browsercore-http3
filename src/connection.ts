@@ -382,7 +382,15 @@ export class Http3ConnectionImpl implements Http3Connection {
                 void err;
             });
         }
-        const stream = await this.quic.acceptUnidirectionalStream();
+        let stream: QuicStream;
+        try {
+            stream = await this.quic.acceptUnidirectionalStream();
+        } catch {
+            // Connection closed before the push stream arrived — the push
+            // resolver was already rejected by cancelPush (or will be by
+            // abortAll when the connection tears down).
+            return;
+        }
         await this.startPushReadLoop(stream, pushId);
     }
 
