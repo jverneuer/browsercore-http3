@@ -101,3 +101,27 @@ export class SettingsAckTimeoutError extends Http3Error {
         this.cause = options?.cause;
     }
 }
+
+/** The connection is closing — no new requests are allowed. */
+export class ConnectionClosingError extends Http3Error {
+    public override readonly kind = "ConnectionClosingError";
+    public override readonly cause: Error | undefined;
+
+    constructor(options?: { cause?: Error }) {
+        super("connection is closing — no new requests allowed", options);
+        this.name = "ConnectionClosingError";
+        this.cause = options?.cause;
+    }
+}
+
+/** The connection is fully closed — in-flight requests are rejected. */
+export class ConnectionClosedError extends Http3Error {
+    public override readonly kind = "ConnectionClosedError";
+    public override readonly cause: Error | undefined;
+
+    constructor(options?: { cause?: Error }) {
+        super("connection is closed", options);
+        this.name = "ConnectionClosedError";
+        this.cause = options?.cause;
+    }
+}

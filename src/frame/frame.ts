@@ -31,7 +31,7 @@ import {
     type Http3SettingsMap,
     type Http3UnknownFrame,
 } from "../types.js";
-import { concat, concatAll } from "../utils.js";
+import { assertNever, concat, concatAll } from "../utils.js";
 import { decodeVarint, encodeVarint } from "./varint.js";
 import { FrameParseError } from "../errors.js";
 
@@ -113,12 +113,10 @@ function serializePayload(frame: Http3Frame): Bytes {
             return encodeVarint(frame.pushId);
         case HTTP3_UNKNOWN_FRAME_TYPE:
             return frame.payload;
-        default: {
+        default:
             // Exhaustiveness guard — forces a compile error if a variant is
             // added without a serialization branch.
-            const unreachable: never = frame;
-            throw new Error(`serializePayload: unhandled frame type ${String(unreachable)}`);
-        }
+            return assertNever(frame);
     }
 }
 

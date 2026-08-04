@@ -13,6 +13,17 @@ export function assertNever(x: never): never {
     throw new Error(`Unexpected value: ${JSON.stringify(x)}`);
 }
 
+/**
+ * Monotonic-ish unique id generator (not cryptographically random).
+ *
+ * This is the single sanctioned home for `Date.now()` / `Math.random()` in
+ * utils — other modules that need an opaque id must call this rather than
+ * reaching for randomness directly.
+ */
+export function createId(prefix: string): string {
+    return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
 /** Concatenate two byte arrays. */
 export function concat(a: Bytes, b: Bytes): Bytes {
     const out = new Uint8Array(a.length + b.length);
