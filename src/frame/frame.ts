@@ -14,9 +14,10 @@
  *   0x7  GOAWAY       stream_id varint
  *   0x0d MAX_PUSH_ID  push_id varint
  *
- * Unknown frame types in the reserved/GREASE ranges (0x2, 0xb..0x1f, 0x21+)
- * MUST be ignored per RFC 9114 §7.1 — `readFrame` returns them as an
- * `Http3UnknownFrame` carrying the raw type + payload so callers can skip them.
+ * GREASE / reserved frame types (RFC 9114 §7.1, §7.2.8) are detected and
+ * skipped by `readFrame` — callers never see them. Non-GREASE unknown frame
+ * types are returned as `Http3UnknownFrame` carrying the raw type + payload
+ * so callers can inspect them.
  */
 
 import {
@@ -51,6 +52,26 @@ export type Http3FrameOfType<T extends Http3FrameTypeValue> = Extract<
     Http3Frame,
     { readonly type: T }
 >;
+
+// ---------------------------------------------------------------------------
+// GREASE detection (RFC 9114 §7.1, §7.2.8)
+// ---------------------------------------------------------------------------
+
+/**
+ * GREASE frame types follow the pattern `0x1f * N + 0x21` for N >= 0. These
+ * reserved values are sent by peers to prevent ossification; implementations
+ * MUST ignore them. The sequence begins 0x21, 0x40, 0x5f, 0x7e, ...
+ *
+ * @see https://www.rfc-editor.org/rfc/rfc9114.html#section-7.2.8
+ */
+export function isGreaseFrameType(type: bigint): boolean {
+    if (type < 0x21n) {
+        return false;
+    }
+    // (type - 0x21) must be a non-negative multiple of 0x1f.
+    const offset = type - 0x21n;
+    return offset % 0x1fn === 0n;
+}
 
 // ---------------------------------------------------------------------------
 // Serialization
@@ -236,17 +257,30 @@ export class FrameReader {
         return decodeVarint(concat(first, rest));
     }
 
-    /** Read and parse one frame. Throws FrameParseError on malformed input. */
+    /**
+     * Read and parse one non-GREASE frame. GREASE / reserved frame types
+     * (RFC 9114 §7.1, §7.2.8) are detected by type and silently skipped —
+     * callers never see them. Non-GREASE unknown frame types are returned as
+     * `Http3UnknownFrame` so callers can inspect them.
+     *
+     * Throws FrameParseError on malformed input or end-of-stream.
+     */
     public async readFrame(): Promise<Http3Frame> {
-        const type = await this.readVarint();
-        const length = await this.readVarint();
-        if (length.value > Number.MAX_SAFE_INTEGER) {
-            throw new FrameParseError(this.buffer.length, {
-                cause: new Error("frame length exceeds safe integer"),
-            });
+        for (;;) {
+            const type = await this.readVarint();
+            const length = await this.readVarint();
+            if (length.value > Number.MAX_SAFE_INTEGER) {
+                throw new FrameParseError(this.buffer.length, {
+                    cause: new Error("frame length exceeds safe integer"),
+                });
+            }
+            const payload = await this.readBytes(Number(length.value));
+            // GREASE / reserved type — consume and skip, then read the next frame.
+            if (isGreaseFrameType(type.value)) {
+                continue;
+            }
+            return parseFramePayload(Number(type.value), payload);
         }
-        const payload = await this.readBytes(Number(length.value));
-        return parseFramePayload(Number(type.value), payload);
     }
 }
 
