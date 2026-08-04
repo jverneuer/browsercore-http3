@@ -41,6 +41,7 @@
         "@browsercore/quic": "0.2.1"
     },
     "devDependencies": {
+        "@browsercore/dev": "latest",
         "@types/node": "^26.1.2",
         "@vitest/coverage-v8": "^4.1.10",
         "oxlint": "^1.76.0",
