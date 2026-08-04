@@ -46,8 +46,7 @@ export class ByteReader {
             throw new QpackDecodeError(`byte read past end at offset ${this.pos}`);
         }
         // pos is guarded above; read the octet without a non-null assertion.
-        const octet = this.buf[this.pos];
-        return octet === undefined ? 0 : octet;
+        return this.buf[this.pos] ?? 0;
     }
 
     public read(): number {

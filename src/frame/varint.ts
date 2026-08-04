@@ -94,10 +94,7 @@ export function decodeVarint(buf: Bytes): DecodedVarint {
     // The length check above guarantees indices 0..length-1 are in bounds.
     // Provide a bounds-safe accessor so indexing needs no non-null assertion
     // under noUncheckedIndexedAccess.
-    const at = (i: number): number => {
-        const v = buf[i];
-        return v === undefined ? 0 : v;
-    };
+    const at = (i: number): number => buf[i] ?? 0;
     const masked = BigInt(at(0) & 0x3f);
     let value: bigint;
     switch (length) {

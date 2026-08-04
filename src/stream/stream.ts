@@ -245,9 +245,11 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
                 p.endStreamSeen = true;
                 break;
             case HTTP3_UNKNOWN_FRAME_TYPE:
-                // GREASE / reserved — ignore.
-                break;
-            default:
+            case Http3FrameType.CANCEL_PUSH:
+            case Http3FrameType.SETTINGS:
+            case Http3FrameType.PUSH_PROMISE:
+            case Http3FrameType.GOAWAY:
+            case Http3FrameType.MAX_PUSH_ID:
                 // Frames illegal on a request/response stream are ignored here;
                 // the connection layer enforces stream-type correctness.
                 break;
@@ -274,8 +276,11 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
                 emitter.emit("maxPushId", frame.pushId);
                 break;
             case HTTP3_UNKNOWN_FRAME_TYPE:
-                break;
-            default:
+            case Http3FrameType.DATA:
+            case Http3FrameType.HEADERS:
+            case Http3FrameType.CANCEL_PUSH:
+            case Http3FrameType.PUSH_PROMISE:
+                // Other frame types are not valid on the control stream; ignore.
                 break;
         }
     }
