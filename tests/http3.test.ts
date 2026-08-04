@@ -310,6 +310,9 @@ describe("constants", () => {
 // ---------------------------------------------------------------------------
 // TODO stubs — covered by asserting their (only) existing behaviour: throwing.
 // These confirm the placeholders are wired up without implementing them.
+// QPACK (encodeHeaders/decodeHeaders/QpackEncoder/QpackDecoder) is implemented
+// in src/qpack/ and covered by tests/qpack-coverage.test.ts, so it is excluded
+// here.
 // ---------------------------------------------------------------------------
 
 describe("TODO stubs throw their placeholder error", () => {
@@ -328,24 +331,6 @@ describe("TODO stubs throw their placeholder error", () => {
 
     it("readFrame is unimplemented", async () => {
         await expect(readFrame(async () => new Uint8Array([0x00]))).rejects.toThrow(/TODO/);
-    });
-
-    it("qpackEncodeHeaders is unimplemented", () => {
-        expect(() => qpackEncodeHeaders(new Map())).toThrow(/TODO/);
-    });
-
-    it("qpackDecodeHeaders is unimplemented", () => {
-        expect(() => qpackDecodeHeaders(new Uint8Array())).toThrow(/TODO/);
-    });
-
-    it("QpackEncoder constructor is unimplemented", () => {
-        expect(() => new QpackEncoder()).toThrow(/TODO/);
-        expect(() => new QpackEncoder(1024)).toThrow(/TODO/);
-    });
-
-    it("QpackDecoder constructor is unimplemented", () => {
-        expect(() => new QpackDecoder()).toThrow(/TODO/);
-        expect(() => new QpackDecoder(1024)).toThrow(/TODO/);
     });
 
     it("createStreamManager is unimplemented", () => {
@@ -382,8 +367,6 @@ describe("TODO stubs throw their placeholder error", () => {
 describe("unimplemented features (PLAN.md checklist)", () => {
     it.todo("Step 1 — varint encode/decode wire round-trip");
     it.todo("Step 2 — every frame type parses and serializes");
-    it.todo("Step 3 — QPACK static table encode/decode round-trip");
-    it.todo("Step 4 — QPACK dynamic table + wire instructions");
     it.todo("Step 5 — stream manager dispatches by stream id");
     it.todo("Step 6 — SETTINGS handshake completes or times out");
     it.todo("Step 7 — concurrent request multiplexing");
