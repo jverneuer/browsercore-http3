@@ -34,6 +34,10 @@ import { GoawayReceivedError, PushCancelledError } from "../errors.js";
 /** Per-bidirectional-stream response accumulation. */
 interface PendingResponse {
     readonly streamId: bigint;
+    /** Whether this resolver backs a client request or a server push. Push ids
+     * and client stream ids share a numeric namespace, so finalize must know
+     * which map owns this entry before deleting it. */
+    readonly kind: "request" | "push";
     readonly resolve: (res: Http3Response) => void;
     readonly reject: (err: Error) => void;
     headerBlock: Bytes;
@@ -185,9 +189,12 @@ const defaultHeaderDecoder: HeaderDecoder = (block) => {
 };
 
 /** Create a stream manager bound to the connection's frame I/O. */
-export function createStreamManager(_handlers: StreamManagerHandlers): StreamManager & EventEmitter {
-    void _handlers;
+export function createStreamManager(handlers: StreamManagerHandlers): StreamManager & EventEmitter {
     const emitter = new StreamEventBridge();
+
+    // Highest client stream id registered via expectResponse — used as the
+    // GOAWAY Last Stream ID when the manager initiates graceful shutdown.
+    let maxStreamId = 0n;
 
     // streamId → pending response resolver (client-initiated bidirectional streams).
     const pending = new Map<bigint, PendingResponse>();
@@ -265,7 +272,10 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
                 break;
         }
         if (p.headersComplete && p.endStreamSeen) {
-            if (pending.has(p.streamId)) {
+            // The owning map is determined by kind, not by probing pending —
+            // push ids and client stream ids share a numeric namespace, so
+            // pending.has(pushId) can be true while the push is still in pushes.
+            if (p.kind === "request") {
                 pending.delete(p.streamId);
             } else {
                 pushes.delete(p.streamId);
@@ -308,8 +318,12 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         resolve: (res: Http3Response) => void,
         reject: (err: Error) => void,
     ): void {
+        if (streamId > maxStreamId) {
+            maxStreamId = streamId;
+        }
         pending.set(streamId, {
             streamId,
+            kind: "request",
             resolve,
             reject,
             headerBlock: new Uint8Array(0),
@@ -326,6 +340,7 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     ): void {
         pushes.set(pushId, {
             streamId: pushId,
+            kind: "push",
             resolve,
             reject,
             headerBlock: new Uint8Array(0),
@@ -344,6 +359,12 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     }
 
     function abortAll(error: Error): void {
+        // Signal graceful shutdown to the peer (GOAWAY) and cancel any pushes
+        // we accepted but never delivered (CANCEL_PUSH) before dropping resolvers.
+        void handlers.sendGoaway(maxStreamId);
+        for (const pushId of pushes.keys()) {
+            void handlers.sendCancelPush(pushId);
+        }
         for (const p of pending.values()) {
             p.reject(error);
         }
