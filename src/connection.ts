@@ -27,18 +27,26 @@ import type { EventEmitter } from "node:events";
 import {
     Http3FrameType,
     type Bytes,
+    type ConnectionId,
     type Http3Connection,
     type Http3Options,
     type Http3Request,
     type Http3Response,
     type Http3SettingsMap,
+    type Http3StreamId,
     type QuicConnection,
     type QuicStream,
 } from "./types.js";
 import { FrameReader, readFrame, serializeFrame } from "./frame/frame.js";
 import { QpackDecoder, encodeHeaders } from "./qpack/qpack.js";
 import { createStreamManager } from "./stream/stream.js";
-import { GoawayReceivedError, SettingsAckTimeoutError } from "./errors.js";
+import {
+    ConnectionClosedError,
+    ConnectionClosingError,
+    GoawayReceivedError,
+    SettingsAckTimeoutError,
+} from "./errors.js";
+import { createId } from "./utils.js";
 
 /** The stream-type identifier written on the control stream (RFC 9114 §6.2). */
 const CONTROL_STREAM_TYPE = 0x0;
@@ -58,7 +66,7 @@ type ByteBuffer = Uint8Array;
  * `Http3Connection` interface; internal state is kept on the instance.
  */
 export class Http3ConnectionImpl implements Http3Connection {
-    public readonly id: string;
+    public readonly id: ConnectionId;
     public settings: Http3SettingsMap;
 
     private readonly quic: QuicConnection;
@@ -71,7 +79,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private decoderStream: QuicStream | undefined;
 
     /** Next client-initiated (even) bidirectional stream id. */
-    private nextStreamId = 0n;
+    private nextStreamId: Http3StreamId = 0n as Http3StreamId;
 
     /** Queue of pending push response promises (pushPromise already fired, push() not yet called). */
     private pendingPushes: Promise<Http3Response>[] = [];
@@ -81,7 +89,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     /** Set once the connection is fully torn down. */
     private closed = false;
 
-    public constructor(id: string, options: Http3Options) {
+    public constructor(id: ConnectionId, options: Http3Options) {
         this.id = id;
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
@@ -95,10 +103,10 @@ export class Http3ConnectionImpl implements Http3Connection {
             },
         });
         this.manager.setHeaderDecoder((block) => this.decodeHeaders(block));
-        this.manager.on("goaway", (lastStreamId: bigint) => {
+        this.manager.on("goaway", (lastStreamId: Http3StreamId) => {
             this.onPeerGoaway(lastStreamId);
         });
-        this.manager.on("pushPromise", (pushId: bigint) => {
+        this.manager.on("pushPromise", (pushId: Http3StreamId) => {
             this.onPushPromise(pushId);
         });
     }
@@ -107,10 +115,10 @@ export class Http3ConnectionImpl implements Http3Connection {
 
     public async request(req: Http3Request): Promise<Http3Response> {
         if (this.closing || this.closed) {
-            throw new Error("connection is closing");
+            throw new ConnectionClosingError();
         }
         const streamId = this.nextStreamId;
-        this.nextStreamId += 2n;
+        this.nextStreamId = (this.nextStreamId + 2n) as Http3StreamId;
 
         const stream = await this.quic.openBidirectionalStream();
 
@@ -162,7 +170,7 @@ export class Http3ConnectionImpl implements Http3Connection {
             return queued;
         }
         return new Promise<Http3Response>((resolve) => {
-            this.manager.once("pushPromise", () => {
+            this.manager.once("pushPromise", (): void => {
                 const p = this.pendingPushes.shift();
                 if (p !== undefined) {
                     resolve(p);
@@ -181,7 +189,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         }
         this.closing = true;
         await this.sendGoaway(this.nextStreamId);
-        this.manager.abortAll(new Error("connection closed"));
+        this.manager.abortAll(new ConnectionClosedError());
         this.closed = true;
         await this.quic.close(0n, "client_close");
     }
@@ -253,7 +261,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     // --- read loops ------------------------------------------------------------
 
     /** Start reading response frames from a bidirectional stream. */
-    private startBidiReadLoop(stream: QuicStream, streamId: bigint): void {
+    private startBidiReadLoop(stream: QuicStream, streamId: Http3StreamId): void {
         const reader = new FrameReader(async () => {
             const chunk = await stream.read();
             return chunk;
@@ -374,7 +382,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         });
     }
 
-    private onPeerGoaway(lastStreamId: bigint): void {
+    private onPeerGoaway(lastStreamId: Http3StreamId): void {
         this.closing = true;
         // Reject streams opened after lastStreamId.
         this.manager.abortAll(new GoawayReceivedError(lastStreamId));
@@ -387,7 +395,7 @@ export class Http3ConnectionImpl implements Http3Connection {
      * queued so the next push() call can drain it — this handles the race
      * where pushPromise fires before push() is awaited.
      */
-    private onPushPromise(pushId: bigint): void {
+    private onPushPromise(pushId: Http3StreamId): void {
         // Register the resolver with the stream manager so the push can be
         // rejected by CANCEL_PUSH before push() is ever called.
         const promise = new Promise<Http3Response>((resolve, reject) => {
@@ -404,7 +412,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     }
 
     /** Read pushed response frames from a push stream. */
-    private async startPushReadLoop(stream: QuicStream, pushId: bigint): Promise<void> {
+    private async startPushReadLoop(stream: QuicStream, pushId: Http3StreamId): Promise<void> {
         // Push streams begin with their stream-type byte (0x1); consume it
         // before parsing frames (RFC 9114 §6.2).
         await stream.read();
@@ -438,7 +446,7 @@ export class Http3ConnectionImpl implements Http3Connection {
  * SETTINGS.
  */
 export async function connectHttp3(options: Http3Options): Promise<Http3Connection> {
-    const id = `http3_${Date.now().toString(36)}`;
+    const id = createId("http3") as ConnectionId;
     const timeoutMs = options.settingsAckTimeoutMs ?? DEFAULT_SETTINGS_ACK_TIMEOUT_MS;
     const conn = new Http3ConnectionImpl(id, options);
     await conn.doHandshake(timeoutMs);

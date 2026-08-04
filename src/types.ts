@@ -25,6 +25,12 @@
 /** A contiguous chunk of wire bytes. */
 export type Bytes = Uint8Array;
 
+/** Branded HTTP/3 connection identifier (opaque string for logging / correlation). */
+export type ConnectionId = string & { __brand: "ConnectionId" };
+
+/** Branded HTTP/3 stream identifier (62-bit, encoded as a QUIC varint). */
+export type Http3StreamId = bigint & { __brand: "Http3StreamId" };
+
 // ---------------------------------------------------------------------------
 // QUIC abstraction (injected — this package implements none of it)
 // ---------------------------------------------------------------------------
@@ -254,7 +260,7 @@ export interface Http3Response {
 /** Public contract for an HTTP/3 connection. */
 export interface Http3Connection {
     /** Opaque identifier for logging / correlation. */
-    readonly id: string;
+    readonly id: ConnectionId;
     /** Current locally-applied settings (after the peer's SETTINGS arrived). */
     readonly settings: Http3SettingsMap;
 
