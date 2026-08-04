@@ -308,28 +308,42 @@ describe("constants", () => {
 });
 
 // ---------------------------------------------------------------------------
+// encodeVarint / decodeVarint — covered in varint.test.ts (Step 1).
+// ---------------------------------------------------------------------------
+
+describe("encodeVarint / decodeVarint", () => {
+    it("are implemented (delegated to varint.test.ts)", () => {
+        // Wire round-trips, error paths, and boundary values live in
+        // varint.test.ts. Here we only assert the functions are callable and
+        // no longer stubs.
+        expect(typeof encodeVarint).toBe("function");
+        expect(typeof decodeVarint).toBe("function");
+        expect(encodeVarint(0n).length).toBe(1);
+        expect(decodeVarint(new Uint8Array([0])).value).toBe(0n);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// serializeFrame / readFrame — covered in frame.test.ts (Step 2).
+// ---------------------------------------------------------------------------
+
+describe("serializeFrame / readFrame", () => {
+    it("are implemented (delegated to frame.test.ts)", () => {
+        expect(typeof serializeFrame).toBe("function");
+        expect(typeof readFrame).toBe("function");
+        // A DATA frame round-trips through the real implementation.
+        const frame: Http3Frame = { type: Http3FrameType.DATA, payload: new Uint8Array([1, 2, 3]) };
+        const bytes = serializeFrame(frame);
+        expect(bytes.length).toBeGreaterThan(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // TODO stubs — covered by asserting their (only) existing behaviour: throwing.
 // These confirm the placeholders are wired up without implementing them.
 // ---------------------------------------------------------------------------
 
 describe("TODO stubs throw their placeholder error", () => {
-    it("encodeVarint is unimplemented", () => {
-        expect(() => encodeVarint(0n)).toThrow(/TODO/);
-    });
-
-    it("decodeVarint is unimplemented", () => {
-        expect(() => decodeVarint(new Uint8Array([0]))).toThrow(/TODO/);
-    });
-
-    it("serializeFrame is unimplemented", () => {
-        const frame: Http3Frame = { type: Http3FrameType.DATA, payload: new Uint8Array() };
-        expect(() => serializeFrame(frame)).toThrow(/TODO/);
-    });
-
-    it("readFrame is unimplemented", async () => {
-        await expect(readFrame(async () => new Uint8Array([0x00]))).rejects.toThrow(/TODO/);
-    });
-
     it("qpackEncodeHeaders is unimplemented", () => {
         expect(() => qpackEncodeHeaders(new Map())).toThrow(/TODO/);
     });

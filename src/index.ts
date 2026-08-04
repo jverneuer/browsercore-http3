@@ -24,6 +24,8 @@ export {
     type Http3FrameOfType,
     type Http3FrameTypeValue,
 } from "./frame/frame.js";
+export { FrameReader } from "./frame/frame.js";
+export { HTTP3_UNKNOWN_FRAME_TYPE, type Http3UnknownFrame } from "./types.js";
 
 export {
     Http3Settings,
