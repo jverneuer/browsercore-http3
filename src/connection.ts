@@ -78,6 +78,12 @@ export class Http3ConnectionImpl implements Http3Connection {
     /** Set once the connection is fully torn down. */
     private closed = false;
 
+    private readonly pushWaiters: Array<{
+        resolve: (res: Http3Response) => void;
+        reject: (err: Error) => void;
+    }> = [];
+    private readonly pushQueue: Http3Response[] = [];
+
     public constructor(id: string, options: Http3Options) {
         this.id = id;
         this.settings = options.initialSettings ?? {};
@@ -94,6 +100,9 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.manager.setHeaderDecoder((block) => this.decodeHeaders(block));
         this.manager.on("goaway", (lastStreamId: bigint) => {
             this.onPeerGoaway(lastStreamId);
+        });
+        this.manager.on("pushPromise", (pushId: bigint) => {
+            void this.onPushPromise(pushId);
         });
     }
 
@@ -141,6 +150,19 @@ export class Http3ConnectionImpl implements Http3Connection {
         return this.sendGoaway(streamId);
     }
 
+    public push(): Promise<Http3Response> {
+        if (this.closed) {
+            return Promise.reject(new Error("connection closed"));
+        }
+        const queued = this.pushQueue.shift();
+        if (queued !== undefined) {
+            return Promise.resolve(queued);
+        }
+        return new Promise<Http3Response>((resolve, reject) => {
+            this.pushWaiters.push({ resolve, reject });
+        });
+    }
+
     public async close(): Promise<void> {
         if (this.closed) {
             return;
@@ -148,6 +170,10 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.closing = true;
         await this.sendGoaway(this.nextStreamId);
         this.manager.abortAll(new Error("connection closed"));
+        for (const waiter of this.pushWaiters) {
+            waiter.reject(new Error("connection closed"));
+        }
+        this.pushWaiters.length = 0;
         this.closed = true;
         await this.quic.close(0n, "client_close");
     }
@@ -342,8 +368,38 @@ export class Http3ConnectionImpl implements Http3Connection {
 
     private onPeerGoaway(lastStreamId: bigint): void {
         this.closing = true;
-        // Reject streams opened after lastStreamId.
         this.manager.abortAll(new GoawayReceivedError(lastStreamId));
+    }
+
+    private async onPushPromise(pushId: bigint): Promise<void> {
+        const waiter = this.pushWaiters.shift();
+        if (waiter !== undefined) {
+            this.manager.expectPush(pushId, waiter.resolve, waiter.reject);
+        } else {
+            this.manager.expectPush(pushId, (res) => {
+                this.pushQueue.push(res);
+            }, (err) => {
+                void err;
+            });
+        }
+        const stream = await this.quic.acceptUnidirectionalStream();
+        await this.startPushReadLoop(stream, pushId);
+    }
+
+    private async startPushReadLoop(stream: QuicStream, pushId: bigint): Promise<void> {
+        await stream.read();
+        const reader = new FrameReader(async () => {
+            const chunk = await stream.read();
+            return chunk;
+        });
+        try {
+            for (;;) {
+                const frame = await reader.readFrame();
+                this.manager.dispatchPushFrame(pushId, frame);
+            }
+        } catch {
+            // Push stream closed / error
+        }
     }
 }
 

@@ -217,6 +217,10 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     }
 
     function dispatchRequestFrame(streamId: bigint, frame: Http3Frame): void {
+        if (frame.type === Http3FrameType.PUSH_PROMISE) {
+            emitter.emit("pushPromise", frame.pushId, frame.payload);
+            return;
+        }
         const p = pending.get(streamId);
         if (p === undefined) {
             return;
@@ -277,6 +281,9 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             case Http3FrameType.MAX_PUSH_ID:
                 emitter.emit("maxPushId", frame.pushId);
                 break;
+            case Http3FrameType.CANCEL_PUSH:
+                cancelPush(frame.pushId, new PushCancelledError(frame.pushId));
+                break;
             case HTTP3_UNKNOWN_FRAME_TYPE:
                 break;
             // A control stream carries only control frames; anything else is
@@ -284,7 +291,6 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             // correctness).
             case Http3FrameType.DATA:
             case Http3FrameType.HEADERS:
-            case Http3FrameType.CANCEL_PUSH:
             case Http3FrameType.PUSH_PROMISE:
                 break;
         }
@@ -320,6 +326,14 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             headersComplete: false,
             endStreamSeen: false,
         });
+    }
+
+    function cancelPush(pushId: bigint, error: Error): void {
+        const p = pushes.get(pushId);
+        if (p !== undefined) {
+            pushes.delete(pushId);
+            p.reject(error);
+        }
     }
 
     function abortAll(error: Error): void {

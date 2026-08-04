@@ -264,6 +264,8 @@ export interface Http3Connection {
      */
     request(req: Http3Request): Promise<Http3Response>;
 
+    push(): Promise<Http3Response>;
+
     /** Send a GOAWAY frame, gracefully shutting down the connection. */
     goaway(streamId: bigint): Promise<void>;
 
