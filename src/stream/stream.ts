@@ -217,6 +217,10 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     }
 
     function dispatchRequestFrame(streamId: bigint, frame: Http3Frame): void {
+        // A PUSH_PROMISE arrives on the request stream that triggered the
+        // push. It is not part of the response — emit an event so the
+        // connection can accept the corresponding push stream and register a
+        // resolver for the pushed response.
         if (frame.type === Http3FrameType.PUSH_PROMISE) {
             emitter.emit("pushPromise", frame.pushId, frame.payload);
             return;
@@ -282,6 +286,9 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
                 emitter.emit("maxPushId", frame.pushId);
                 break;
             case Http3FrameType.CANCEL_PUSH:
+                // The peer is cancelling a pushed resource — reject the pending
+                // push resolver with PushCancelledError so callers can match on
+                // `kind` and clean up.
                 cancelPush(frame.pushId, new PushCancelledError(frame.pushId));
                 break;
             case HTTP3_UNKNOWN_FRAME_TYPE:
