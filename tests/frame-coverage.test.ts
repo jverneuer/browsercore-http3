@@ -217,35 +217,35 @@ describe("frame error paths", () => {
     it("truncated MAX_PUSH_ID", async () => { await expect(readFrame(oneShot(new Uint8Array([0x0d, 0x08, 0xc0])))).rejects.toThrow(FrameParseError); });
 });
 
-describe("GREASE frames", () => {
-    it("type 0x2", async () => {
+describe("GREASE frames (RFC 9114 §7.1, §7.2.8)", () => {
+    it("type 0x2 returned as unknown", async () => {
         const g = concat(encodeVarint(0x2n), concat(encodeVarint(1n), new Uint8Array([0xff])));
-        const frames = await parseAll(concat(g, serializeFrame(df(new Uint8Array([1])))));
-        expect(frames[0]!.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
+        expect((await parseAll(g))[0]!.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
     });
-    it("type 0x0b", async () => {
+    it("type 0x0b returned as unknown", async () => {
         const g = concat(encodeVarint(0x0bn), concat(encodeVarint(0n), new Uint8Array()));
         expect((await parseAll(g))[0]!.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
     });
-    it("type 0x21", async () => {
+    it("type 0x21 is skipped", async () => {
         const g = concat(encodeVarint(0x21n), concat(encodeVarint(1n), new Uint8Array([0xff])));
-        expect((await parseAll(g))[0]!.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
+        const frames = await parseAll(concat(g, serializeFrame(df(new Uint8Array([1])))));
+        expect(frames).toHaveLength(1);
+        expect(frames[0]!.type).toBe(Http3FrameType.DATA);
     });
-    it("interleaved DATA + 0x2 + 0x21", async () => {
+    it("interleaved DATA + 0x2 + 0x21 parses only DATA and 0x2", async () => {
         const d = serializeFrame(df(new Uint8Array([5])));
         const g2 = concat(encodeVarint(0x2n), concat(encodeVarint(1n), new Uint8Array([0xff])));
         const g21 = concat(encodeVarint(0x21n), concat(encodeVarint(1n), new Uint8Array([0xee])));
         const frames = await parseAll(concat(concat(d, g2), g21));
-        expect(frames).toHaveLength(3);
+        expect(frames).toHaveLength(2);
         expect(frames[0]!.type).toBe(Http3FrameType.DATA);
         expect(frames[1]!.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
-        expect(frames[2]!.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
     });
-    it("only GREASE yields only unknown", async () => {
-        const g2 = concat(encodeVarint(0x2n), concat(encodeVarint(0n), new Uint8Array()));
+    it("only GREASE frames yields no parseable frames", async () => {
         const g21 = concat(encodeVarint(0x21n), concat(encodeVarint(0n), new Uint8Array()));
-        const frames = await parseAll(concat(g2, g21));
-        expect(frames.every(f => f.type === HTTP3_UNKNOWN_FRAME_TYPE)).toBe(true);
+        const g40 = concat(encodeVarint(0x40n), concat(encodeVarint(0n), new Uint8Array()));
+        const frames = await parseAll(concat(g21, g40));
+        expect(frames).toHaveLength(0);
     });
 });
 

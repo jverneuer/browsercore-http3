@@ -13,6 +13,7 @@ import {
     HTTP3_UNKNOWN_FRAME_TYPE,
     Http3FrameType,
     Http3Settings,
+    isGreaseFrameType,
     type Http3Frame,
     type Http3UnknownFrame,
 } from "../src/index.js";
@@ -141,13 +142,10 @@ describe("MAX_PUSH_ID frame", () => {
     });
 });
 
-describe("unknown / GREASE frames (RFC 9114 §7.1)", () => {
+describe("unknown / GREASE frames (RFC 9114 §7.1, §7.2.8)", () => {
     it("parses a reserved 0x2 frame as unknown and retains its payload", async () => {
         const payload = new Uint8Array([0xaa, 0xbb]);
-        const bytes = concat(
-            concat(encodeVarintLocal(0x2n), encodeVarintLocal(BigInt(payload.length))),
-            payload,
-        );
+        const bytes = concat(concat(encodeVarintLocal(0x2n), encodeVarintLocal(BigInt(payload.length))), payload);
         const parsed = (await parseAll(bytes))[0]!;
         expect(parsed.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
         if (parsed.type === HTTP3_UNKNOWN_FRAME_TYPE) {
@@ -155,43 +153,55 @@ describe("unknown / GREASE frames (RFC 9114 §7.1)", () => {
             expect(parsed.payload).toEqual(payload);
         }
     });
-
-    it("parses a GREASE 0x21 frame as unknown", async () => {
-        const bytes = concat(
-            concat(encodeVarintLocal(0x21n), encodeVarintLocal(1n)),
-            new Uint8Array([0xff]),
-        );
-        const parsed = (await parseAll(bytes))[0]!;
-        expect(parsed.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
-        expect((parsed as Http3UnknownFrame).rawType).toBe(0x21);
+    it("skips a GREASE 0x21 frame (RFC 9114 §7.2.8)", async () => {
+        const grease = concat(concat(encodeVarintLocal(0x21n), encodeVarintLocal(1n)), new Uint8Array([0xff]));
+        const data = serializeFrame({ type: Http3FrameType.DATA, payload: new Uint8Array([0x01]) });
+        const frames = await parseAll(concat(grease, data));
+        expect(frames).toHaveLength(1);
+        expect(frames[0]!.type).toBe(Http3FrameType.DATA);
     });
-
-    it("returns unknown frames so the consumer can skip them (does not drop bytes)", async () => {
-        // DATA, 0x21 GREASE, DATA. The frame reader must NOT silently drop the
-        // GREASE frame (that would hide it from logs/counters); it returns it
-        // as an Http3UnknownFrame so the consumer can choose to skip it — and
-        // crucially, the trailing DATA frame must still parse.
+    it("skips GREASE frames interleaved with known frames", async () => {
         const data1 = serializeFrame({ type: Http3FrameType.DATA, payload: new Uint8Array([1]) });
-        const grease = concat(
-            concat(encodeVarintLocal(0x21n), encodeVarintLocal(1n)),
-            new Uint8Array([0xff]),
-        );
+        const grease = concat(concat(encodeVarintLocal(0x21n), encodeVarintLocal(1n)), new Uint8Array([0xff]));
         const data2 = serializeFrame({ type: Http3FrameType.DATA, payload: new Uint8Array([2]) });
         const frames = await parseAll(concat(concat(data1, grease), data2));
-        expect(frames).toHaveLength(3);
+        expect(frames).toHaveLength(2);
         expect(frames[0]!.type).toBe(Http3FrameType.DATA);
-        expect(frames[1]!.type).toBe(HTTP3_UNKNOWN_FRAME_TYPE);
-        expect(frames[2]!.type).toBe(Http3FrameType.DATA);
-        if (frames[0]!.type === Http3FrameType.DATA && frames[2]!.type === Http3FrameType.DATA) {
-            expect(frames[0]!.payload).toEqual(new Uint8Array([1]));
-            expect(frames[2]!.payload).toEqual(new Uint8Array([2]));
-        }
-        // A consumer "skipping" unknown frames keeps only the known ones.
-        const known = frames.filter((f) => f.type !== HTTP3_UNKNOWN_FRAME_TYPE);
-        expect(known).toHaveLength(2);
+        expect(frames[1]!.type).toBe(Http3FrameType.DATA);
+    });
+    it("skips multiple consecutive GREASE frames", async () => {
+        const g1 = concat(concat(encodeVarintLocal(0x21n), encodeVarintLocal(1n)), new Uint8Array([0x01]));
+        const g2 = concat(concat(encodeVarintLocal(0x40n), encodeVarintLocal(2n)), new Uint8Array([0x02, 0x03]));
+        const data = serializeFrame({ type: Http3FrameType.DATA, payload: new Uint8Array([0x04]) });
+        const frames = await parseAll(concat(concat(g1, g2), data));
+        expect(frames).toHaveLength(1);
+        expect(frames[0]!.type).toBe(Http3FrameType.DATA);
+    });
+    it("skips a GREASE frame with a non-zero payload length", async () => {
+        const grease = concat(concat(encodeVarintLocal(0x5fn), encodeVarintLocal(3n)), new Uint8Array([0xaa, 0xbb, 0xcc]));
+        const data = serializeFrame({ type: Http3FrameType.DATA, payload: new Uint8Array([0x05]) });
+        const frames = await parseAll(concat(grease, data));
+        expect(frames).toHaveLength(1);
+        expect(frames[0]!.type).toBe(Http3FrameType.DATA);
     });
 });
-
+describe("isGreaseFrameType (RFC 9114 §7.2.8)", () => {
+    it("detects the GREASE sequence", () => {
+        for (const v of [0x21n, 0x40n, 0x5fn, 0x7en, 0x9dn]) {
+            expect(isGreaseFrameType(v)).toBe(true);
+        }
+    });
+    it("returns false for known frame types", () => {
+        expect(isGreaseFrameType(0x0n)).toBe(false);
+        expect(isGreaseFrameType(0x1n)).toBe(false);
+        expect(isGreaseFrameType(0x0dn)).toBe(false);
+    });
+    it("returns false for non-GREASE types", () => {
+        expect(isGreaseFrameType(0x2n)).toBe(false);
+        expect(isGreaseFrameType(0x0bn)).toBe(false);
+        expect(isGreaseFrameType(0x22n)).toBe(false);
+    });
+});
 describe("FrameReader — chunk reassembly", () => {
     it("reassembles a frame delivered byte-by-byte", async () => {
         const full = serializeFrame({
