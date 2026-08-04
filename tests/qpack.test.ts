@@ -11,9 +11,12 @@ import {
     QpackDecoder,
     QpackDynamicTable,
     QpackEncoder,
-    decodeHeaders,
-    encodeHeaders,
+    qpackDecodeHeaders,
+    qpackEncodeHeaders,
 } from "../src/index.js";
+
+const encodeHeaders = qpackEncodeHeaders;
+const decodeHeaders = qpackDecodeHeaders;
 
 describe("static-table encode/decode (Step 3)", () => {
     it("round-trips a header block of literal-name fields", () => {
@@ -35,7 +38,7 @@ describe("static-table encode/decode (Step 3)", () => {
     });
 
     it("round-trips :method GET via a static indexed reference", () => {
-        const headers = new Map([":method", "GET"]);
+        const headers = new Map([[":method", "GET"]]);
         const block = encodeHeaders(headers);
         const decoded = decodeHeaders(block);
         expect(decoded.get(":method")).toBe("GET");

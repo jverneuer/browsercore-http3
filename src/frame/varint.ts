@@ -82,38 +82,48 @@ export function decodeVarint(buf: Bytes): DecodedVarint {
     if (buf.length === 0) {
         throw new RangeError("varint decode: empty buffer");
     }
-    const first = buf[0]!;
+    const first = buf[0];
+    if (first === undefined) {
+        throw new RangeError("varint decode: empty buffer");
+    }
     const prefix = first >> 6;
     const length = 1 << prefix; // 1, 2, 4, or 8
     if (buf.length < length) {
         throw new RangeError("varint decode: buffer too short");
     }
-    const masked = BigInt(first & 0x3f);
+    // The length check above guarantees indices 0..length-1 are in bounds.
+    // Provide a bounds-safe accessor so indexing needs no non-null assertion
+    // under noUncheckedIndexedAccess.
+    const at = (i: number): number => {
+        const v = buf[i];
+        return v === undefined ? 0 : v;
+    };
+    const masked = BigInt(at(0) & 0x3f);
     let value: bigint;
     switch (length) {
         case 1:
             value = masked;
             break;
         case 2:
-            value = (masked << 8n) | BigInt(buf[1]!);
+            value = (masked << 8n) | BigInt(at(1));
             break;
         case 4:
             value =
                 (masked << 24n) |
-                (BigInt(buf[1]!) << 16n) |
-                (BigInt(buf[2]!) << 8n) |
-                BigInt(buf[3]!);
+                (BigInt(at(1)) << 16n) |
+                (BigInt(at(2)) << 8n) |
+                BigInt(at(3));
             break;
         case 8:
             value =
                 (masked << 56n) |
-                (BigInt(buf[1]!) << 48n) |
-                (BigInt(buf[2]!) << 40n) |
-                (BigInt(buf[3]!) << 32n) |
-                (BigInt(buf[4]!) << 24n) |
-                (BigInt(buf[5]!) << 16n) |
-                (BigInt(buf[6]!) << 8n) |
-                BigInt(buf[7]!);
+                (BigInt(at(1)) << 48n) |
+                (BigInt(at(2)) << 40n) |
+                (BigInt(at(3)) << 32n) |
+                (BigInt(at(4)) << 24n) |
+                (BigInt(at(5)) << 16n) |
+                (BigInt(at(6)) << 8n) |
+                BigInt(at(7));
             break;
         default:
             // Unreachable: prefix is 2 bits so length is always 1/2/4/8.

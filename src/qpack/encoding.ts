@@ -19,7 +19,7 @@ export class ByteWriter {
     }
 
     public writeBytes(data: Uint8Array): void {
-        for (const b of data) this.bytes.push(b);
+        for (const b of data) {this.bytes.push(b);}
     }
 
     public toBytes(): Uint8Array {
@@ -45,7 +45,9 @@ export class ByteReader {
         if (this.pos >= this.buf.length) {
             throw new QpackDecodeError(`byte read past end at offset ${this.pos}`);
         }
-        return this.buf[this.pos]!;
+        // pos is guarded above; read the octet without a non-null assertion.
+        const octet = this.buf[this.pos];
+        return octet === undefined ? 0 : octet;
     }
 
     public read(): number {

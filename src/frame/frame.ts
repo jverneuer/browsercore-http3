@@ -80,8 +80,7 @@ function serializePayload(frame: Http3Frame): Bytes {
                 if (typeof value !== "number") {
                     continue;
                 }
-                parts.push(encodeVarint(BigInt(Number(key))));
-                parts.push(encodeVarint(BigInt(value)));
+                parts.push(encodeVarint(BigInt(Number(key))), encodeVarint(BigInt(value)));
             }
             return concatAll(parts);
         }
@@ -96,8 +95,8 @@ function serializePayload(frame: Http3Frame): Bytes {
         default: {
             // Exhaustiveness guard — forces a compile error if a variant is
             // added without a serialization branch.
-            const _exhaustive: never = frame;
-            throw new Error(`serializePayload: unhandled frame type ${_exhaustive}`);
+            const unreachable: never = frame;
+            throw new Error(`serializePayload: unhandled frame type ${unreachable}`);
         }
     }
 }
@@ -198,6 +197,7 @@ export class FrameReader {
     /** Top up the internal buffer until it holds at least `n` bytes. */
     private async ensure(n: number): Promise<void> {
         while (this.buffer.length < n) {
+            // oxlint-disable-next-line no-await-in-loop -- each read depends on accumulated bytes; ordering is inherent
             const chunk = await this.read();
             if (chunk.length === 0) {
                 throw new FrameParseError(this.buffer.length, {
@@ -224,7 +224,10 @@ export class FrameReader {
     /** Read one varint (1–8 bytes) from the buffer. */
     private async readVarint(): Promise<{ value: bigint; length: number }> {
         const first = await this.readBytes(1);
-        const prefix = first[0]! >> 6;
+        // readBytes(1) guarantees a single octet; extract it without a non-null
+        // assertion (noUncheckedIndexedAccess makes array access nullable).
+        const firstOctet = first[0] ?? 0;
+        const prefix = firstOctet >> 6;
         const total = 1 << prefix; // 1, 2, 4, or 8
         if (total === 1) {
             return decodeVarint(first);

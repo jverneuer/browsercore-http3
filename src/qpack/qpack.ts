@@ -12,7 +12,7 @@
  * here for deterministic, testable output.
  */
 
-import type { Bytes, HeaderField } from "../types.js";
+import type { Bytes, HeaderField, HeaderBlock } from "../types.js";
 import { QpackDecodeError } from "../errors.js";
 import { STATIC_TABLE } from "./tables.js";
 import { QpackDynamicTable } from "./dynamic-table.js";
@@ -35,7 +35,8 @@ export type { HeaderField, HeaderBlock };
 
 function findStaticField(name: string, value: string): number {
     for (let i = 0; i < STATIC_TABLE.length; i += 1) {
-        const entry = STATIC_TABLE[i]!;
+        // i < STATIC_TABLE.length guarantees the index is in bounds.
+        const entry = STATIC_TABLE[i] ?? { name: "", value: "" };
         if (entry.name === name && entry.value === value) {
             return i;
         }
@@ -45,7 +46,7 @@ function findStaticField(name: string, value: string): number {
 
 function findStaticName(name: string): number {
     for (let i = 0; i < STATIC_TABLE.length; i += 1) {
-        if (STATIC_TABLE[i]!.name === name) {
+        if ((STATIC_TABLE[i] ?? { name: "" }).name === name) {
             return i;
         }
     }
@@ -174,16 +175,16 @@ export class QpackEncoder {
 
         for (const [name, value] of headers) {
             const existing = this.findDynamic(name, value);
-            if (existing !== -1) {
-                const relative = base - 1 - existing;
-                writeDynamicIndexRef(fieldsWriter, relative);
-                requiredInsertCount = Math.max(requiredInsertCount, existing + 1);
-            } else {
+            if (existing === -1) {
                 writeInsertLiteralName(encWriter, name, value);
                 this.table.insert(name, value);
                 const postBase = this.table.insertCount - base - 1;
                 writePostBaseIndexRef(fieldsWriter, postBase);
                 requiredInsertCount = this.table.insertCount;
+            } else {
+                const relative = base - 1 - existing;
+                writeDynamicIndexRef(fieldsWriter, relative);
+                requiredInsertCount = Math.max(requiredInsertCount, existing + 1);
             }
         }
 
@@ -277,16 +278,20 @@ export class QpackDecoder {
     }
 
     private decodeIndexed(reader: ByteReader, base: number): HeaderField {
-        const value = readPrefixedInt(reader, 6);
-        const t = (value >> 5) & 1;
-        const index = value & 0x1f;
-        if (t === 1) {
+        // Layout: 1 T <Index 6+>. The T bit (bit 6) selects static (T=1) vs
+        // dynamic (T=0); the index is a 6-bit prefixed integer. Read the first
+        // byte to extract T before consuming the prefixed index.
+        const first = reader.peek();
+        const t = (first & 0x40) !== 0;
+        const index = readPrefixedInt(reader, 6);
+        if (t) {
             const entry = STATIC_TABLE[index];
             if (entry === undefined) {
                 throw new QpackDecodeError(`indexed field line: invalid static index ${index}`);
             }
             return { name: entry.name, value: entry.value };
         }
+        // Dynamic relative index: absolute = base - 1 - index.
         const absolute = base - 1 - index;
         const entry = this.table.getByAbsoluteIndex(absolute);
         if (entry === undefined) {
@@ -296,11 +301,12 @@ export class QpackDecoder {
     }
 
     private decodeLiteralNameRef(reader: ByteReader, base: number): HeaderField {
-        const nameIndex = readPrefixedInt(reader, 4);
-        const t = (nameIndex >> 3) & 1;
-        const index = nameIndex & 0x07;
+        // Layout: 0 1 N T <NameIdx 4+>. T (bit 5) selects static vs dynamic.
+        const first = reader.peek();
+        const t = (first & 0x20) !== 0;
+        const index = readPrefixedInt(reader, 4);
         const value = readStringLiteral(reader);
-        if (t === 1) {
+        if (t) {
             const entry = STATIC_TABLE[index];
             if (entry === undefined) {
                 throw new QpackDecodeError(`literal name ref: invalid static index ${index}`);

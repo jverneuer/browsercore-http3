@@ -46,6 +46,7 @@ export {
     decodeHeaders as qpackDecodeHeaders,
     encodeHeaders as qpackEncodeHeaders,
     QpackDecoder,
+    QpackDynamicTable,
     QpackEncoder,
 } from "./qpack/qpack.js";
 export type { HeaderField, HeaderBlock } from "./qpack/qpack.js";
