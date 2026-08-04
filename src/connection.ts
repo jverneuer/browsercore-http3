@@ -99,7 +99,7 @@ export class Http3ConnectionImpl implements Http3Connection {
             this.onPeerGoaway(lastStreamId);
         });
         this.manager.on("pushPromise", (pushId: bigint) => {
-            void this.onPushPromise(pushId);
+            this.onPushPromise(pushId);
         });
     }
 
@@ -152,17 +152,21 @@ export class Http3ConnectionImpl implements Http3Connection {
      * in onPushPromise, so push() can drain it immediately. Otherwise push()
      * waits for the next event.
      */
-    public async push(): Promise<Http3Response> {
+    public push(): Promise<Http3Response> {
         // If a pushPromise event already fired (race: event emitted before
         // push() was called), drain the already-queued promise. Otherwise
         // wait for the next event — onPushPromise will queue a promise that
         // the listener below dequeues.
-        if (this.pendingPushes.length > 0) {
-            return this.pendingPushes.shift()!;
+        const queued = this.pendingPushes.shift();
+        if (queued !== undefined) {
+            return queued;
         }
         return new Promise<Http3Response>((resolve) => {
             this.manager.once("pushPromise", () => {
-                resolve(this.pendingPushes.shift()!);
+                const p = this.pendingPushes.shift();
+                if (p !== undefined) {
+                    resolve(p);
+                }
             });
         });
     }
@@ -394,9 +398,9 @@ export class Http3ConnectionImpl implements Http3Connection {
         // start reading pushed response frames. If the connection closes
         // before the push stream arrives, the accept rejects — swallow it
         // (the push resolver is already rejected by abortAll in close()).
-        void this.quic.acceptUnidirectionalStream().then((stream) => {
-            this.startPushReadLoop(stream, pushId);
-        }).catch(() => {});
+        void this.quic.acceptUnidirectionalStream()
+            .then((stream) => this.startPushReadLoop(stream, pushId))
+            .catch(() => {});
     }
 
     /** Read pushed response frames from a push stream. */
