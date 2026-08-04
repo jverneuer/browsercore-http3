@@ -26,12 +26,14 @@
 import type { EventEmitter } from "node:events";
 import {
     Http3FrameType,
+    silentLogger,
     type Bytes,
     type Http3Connection,
     type Http3Options,
     type Http3Request,
     type Http3Response,
     type Http3SettingsMap,
+    type Logger,
     type QuicConnection,
     type QuicStream,
 } from "./types.js";
@@ -64,6 +66,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private readonly quic: QuicConnection;
     private readonly qpackDec: QpackDecoder;
     private readonly manager: ReturnType<typeof createStreamManager> & EventEmitter;
+    private readonly logger: Logger;
 
     /** Our control + QPACK streams (written to). */
     private controlStream: QuicStream | undefined;
@@ -85,6 +88,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.id = id;
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
+        this.logger = options.logger ?? silentLogger;
         this.qpackDec = new QpackDecoder();
         this.manager = createStreamManager({
             sendGoaway: (streamId) => {
@@ -179,6 +183,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         if (this.closed) {
             return;
         }
+        this.logger.debug("closing connection", { id: this.id });
         this.closing = true;
         await this.sendGoaway(this.nextStreamId);
         this.manager.abortAll(new Error("connection closed"));
@@ -368,6 +373,10 @@ export class Http3ConnectionImpl implements Http3Connection {
             const onSettings = (): void => {
                 clearTimeout(timer);
                 this.manager.off("settings", onSettings);
+                this.logger.debug("SETTINGS handshake complete", {
+                    id: this.id,
+                    settings: this.settings,
+                });
                 resolve();
             };
             this.manager.once("settings", onSettings);
@@ -376,6 +385,7 @@ export class Http3ConnectionImpl implements Http3Connection {
 
     private onPeerGoaway(lastStreamId: bigint): void {
         this.closing = true;
+        this.logger.warn("peer sent GOAWAY", { id: this.id, lastStreamId: String(lastStreamId) });
         // Reject streams opened after lastStreamId.
         this.manager.abortAll(new GoawayReceivedError(lastStreamId));
     }
