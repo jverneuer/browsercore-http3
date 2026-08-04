@@ -78,12 +78,6 @@ export class Http3ConnectionImpl implements Http3Connection {
     /** Set once the connection is fully torn down. */
     private closed = false;
 
-    private readonly pushWaiters: Array<{
-        resolve: (res: Http3Response) => void;
-        reject: (err: Error) => void;
-    }> = [];
-    private readonly pushQueue: Http3Response[] = [];
-
     public constructor(id: string, options: Http3Options) {
         this.id = id;
         this.settings = options.initialSettings ?? {};
@@ -150,19 +144,6 @@ export class Http3ConnectionImpl implements Http3Connection {
         return this.sendGoaway(streamId);
     }
 
-    public push(): Promise<Http3Response> {
-        if (this.closed) {
-            return Promise.reject(new Error("connection closed"));
-        }
-        const queued = this.pushQueue.shift();
-        if (queued !== undefined) {
-            return Promise.resolve(queued);
-        }
-        return new Promise<Http3Response>((resolve, reject) => {
-            this.pushWaiters.push({ resolve, reject });
-        });
-    }
-
     public async close(): Promise<void> {
         if (this.closed) {
             return;
@@ -170,10 +151,6 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.closing = true;
         await this.sendGoaway(this.nextStreamId);
         this.manager.abortAll(new Error("connection closed"));
-        for (const waiter of this.pushWaiters) {
-            waiter.reject(new Error("connection closed"));
-        }
-        this.pushWaiters.length = 0;
         this.closed = true;
         await this.quic.close(0n, "client_close");
     }
@@ -368,47 +345,48 @@ export class Http3ConnectionImpl implements Http3Connection {
 
     private onPeerGoaway(lastStreamId: bigint): void {
         this.closing = true;
+        // Reject streams opened after lastStreamId.
         this.manager.abortAll(new GoawayReceivedError(lastStreamId));
     }
 
+    /**
+     * Handle a server push promise: register a push resolver with the stream
+     * manager and accept the corresponding push stream to read the pushed
+     * response. Push streams are unidirectional (type 0x1) and carry a
+     * HEADERS frame followed by DATA, like a response stream.
+     */
     private async onPushPromise(pushId: bigint): Promise<void> {
-        const waiter = this.pushWaiters.shift();
-        if (waiter === undefined) {
-            this.manager.expectPush(pushId, (res) => {
-                this.pushQueue.push(res);
-            }, (err) => {
-                void err;
-            });
-        } else {
-            this.manager.expectPush(pushId, waiter.resolve, waiter.reject);
-        }
-        let stream: QuicStream;
-        try {
-            stream = await this.quic.acceptUnidirectionalStream();
-        } catch {
-            // Connection closed before the push stream arrived — the push
-            // resolver was already rejected by cancelPush (or will be by
-            // abortAll when the connection tears down).
-            return;
-        }
-        await this.startPushReadLoop(stream, pushId);
+        // Register the push resolver. The pushed response resolves this promise
+        // once HEADERS + end-of-DATA arrive on the push stream.
+        const promise = new Promise<Http3Response>((resolve, reject) => {
+            this.manager.expectPush(pushId, resolve, reject);
+        });
+        // Accept the push stream the server opened for this push id.
+        const stream = await this.quic.acceptUnidirectionalStream();
+        // Start reading pushed response frames from the push stream.
+        this.startPushReadLoop(stream, pushId);
+        // Keep the promise alive (caller may await it via the push API).
+        void promise;
     }
 
-    private async startPushReadLoop(stream: QuicStream, pushId: bigint): Promise<void> {
-        await stream.read();
+    /** Read pushed response frames from a push stream. */
+    private startPushReadLoop(stream: QuicStream, pushId: bigint): void {
         const reader = new FrameReader(async () => {
             const chunk = await stream.read();
             return chunk;
         });
-        try {
-            for (;;) {
-                // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
-                const frame = await reader.readFrame();
-                this.manager.dispatchPushFrame(pushId, frame);
+        void (async () => {
+            try {
+                for (;;) {
+                    // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
+                    const frame = await reader.readFrame();
+                    this.manager.dispatchPushFrame(pushId, frame);
+                }
+            } catch {
+                // Push stream closed / error — the manager's push resolver
+                // either already resolved or was rejected by cancelPush.
             }
-        } catch {
-            // Push stream closed / error
-        }
+        })();
     }
 }
 
