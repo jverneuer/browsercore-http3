@@ -217,6 +217,14 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     }
 
     function dispatchRequestFrame(streamId: bigint, frame: Http3Frame): void {
+        // A PUSH_PROMISE arrives on the request stream that triggered the
+        // push. It is not part of the response — emit an event so the
+        // connection can accept the corresponding push stream and register a
+        // resolver for the pushed response.
+        if (frame.type === Http3FrameType.PUSH_PROMISE) {
+            emitter.emit("pushPromise", frame.pushId, frame.payload);
+            return;
+        }
         const p = pending.get(streamId);
         if (p === undefined) {
             return;
@@ -277,6 +285,12 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             case Http3FrameType.MAX_PUSH_ID:
                 emitter.emit("maxPushId", frame.pushId);
                 break;
+            case Http3FrameType.CANCEL_PUSH:
+                // The peer is cancelling a pushed resource — reject the pending
+                // push resolver with PushCancelledError so callers can match on
+                // `kind` and clean up.
+                cancelPush(frame.pushId, new PushCancelledError(frame.pushId));
+                break;
             case HTTP3_UNKNOWN_FRAME_TYPE:
                 break;
             // A control stream carries only control frames; anything else is
@@ -284,7 +298,6 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             // correctness).
             case Http3FrameType.DATA:
             case Http3FrameType.HEADERS:
-            case Http3FrameType.CANCEL_PUSH:
             case Http3FrameType.PUSH_PROMISE:
                 break;
         }
@@ -320,6 +333,14 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             headersComplete: false,
             endStreamSeen: false,
         });
+    }
+
+    function cancelPush(pushId: bigint, error: Error): void {
+        const p = pushes.get(pushId);
+        if (p !== undefined) {
+            pushes.delete(pushId);
+            p.reject(error);
+        }
     }
 
     function abortAll(error: Error): void {
