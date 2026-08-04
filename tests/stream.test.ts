@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createStreamManager } from "../src/stream/stream.js";
+import { createStreamManager, PushCancelledError } from "../src/stream/stream.js";
 import { Http3FrameType, type Http3Frame } from "../src/types.js";
 
 const HEADERS = (payload: number[]): Http3Frame => ({
