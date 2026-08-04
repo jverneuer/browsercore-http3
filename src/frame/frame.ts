@@ -271,11 +271,6 @@ export class FrameReader {
             const type = await this.readVarint();
             // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
             const length = await this.readVarint();
-            if (length.value > Number.MAX_SAFE_INTEGER) {
-                throw new FrameParseError(this.buffer.length, {
-                    cause: new Error("frame length exceeds safe integer"),
-                });
-            }
             // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
             const payload = await this.readBytes(Number(length.value));
             // GREASE / reserved type — consume and skip, then read the next frame.
