@@ -13,6 +13,7 @@ import { QpackDecodeError } from "../src/errors.js";
 import {
     ByteReader,
     ByteWriter,
+    huffmanEncode,
     readPrefixedInt,
     readStringLiteral,
     readTaggedStringLiteral,
@@ -119,12 +120,13 @@ describe("writePrefixedIntWithBase — multi-byte spill", () => {
     });
 });
 
-describe("writeStringLiteral / readStringLiteral (H=0)", () => {
+describe("writeStringLiteral / readStringLiteral (H=1 Huffman)", () => {
     it("round-trips a short string", () => {
         const w = new ByteWriter();
         writeStringLiteral(w, "hello");
         const bytes = w.toBytes();
-        expect(bytes[0]! & 0x80).toBe(0);
+        // H=1: the high bit of the length prefix is set.
+        expect(bytes[0]! & 0x80).toBe(0x80);
         expect(readStringLiteral(new ByteReader(bytes))).toBe("hello");
     });
 
@@ -135,9 +137,27 @@ describe("writeStringLiteral / readStringLiteral (H=0)", () => {
         expect(readStringLiteral(new ByteReader(w.toBytes()))).toBe(longValue);
     });
 
-    it("rejects H=1 (Huffman) string literals", () => {
-        const bytes = new Uint8Array([0x81, 0x61]);
-        expect(() => readStringLiteral(new ByteReader(bytes))).toThrow(QpackDecodeError);
+    it("decodes a real Huffman-encoded value (H=1)", () => {
+        const raw = new TextEncoder().encode("gzip");
+        const encoded = huffmanEncode(raw);
+        const w = new ByteWriter();
+        writePrefixedIntWithBase(w, 0x80, encoded.length, 7);
+        w.writeBytes(encoded);
+        expect(readStringLiteral(new ByteReader(w.toBytes()))).toBe("gzip");
+    });
+
+    it("still decodes H=0 (literal) string literals", () => {
+        const bytes = new Uint8Array([0x01, 0x61]);
+        expect(readStringLiteral(new ByteReader(bytes))).toBe("a");
+    });
+
+    it("decodes a hand-built Huffman value for 'www.example.com'", () => {
+        const value = "www.example.com";
+        const encoded = huffmanEncode(new TextEncoder().encode(value));
+        const w = new ByteWriter();
+        writePrefixedIntWithBase(w, 0x80, encoded.length, 7);
+        w.writeBytes(encoded);
+        expect(readStringLiteral(new ByteReader(w.toBytes()))).toBe(value);
     });
 });
 
@@ -150,9 +170,13 @@ describe("readTaggedStringLiteral", () => {
         expect(readTaggedStringLiteral(new ByteReader(w.toBytes()), 5)).toBe("custom-key");
     });
 
-    it("rejects H=1 (Huffman) tagged string literals", () => {
-        // n=5: huffman mask is bit 4 (0x10). Set length 1 + H -> 0x11.
-        const bytes = new Uint8Array([0x11, 0x61]);
-        expect(() => readTaggedStringLiteral(new ByteReader(bytes), 5)).toThrow(QpackDecodeError);
+    it("decodes a Huffman (H=1) tagged string literal", () => {
+        // n=5: per the code's huffmanMask = 1 << n, the H flag is at bit 5 (0x20).
+        const value = "custom-key";
+        const encoded = huffmanEncode(new TextEncoder().encode(value));
+        const w = new ByteWriter();
+        writePrefixedIntWithBase(w, 0x40 | 0x20, encoded.length, 5);
+        w.writeBytes(encoded);
+        expect(readTaggedStringLiteral(new ByteReader(w.toBytes()), 5)).toBe(value);
     });
 });
