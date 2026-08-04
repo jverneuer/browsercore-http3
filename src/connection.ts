@@ -39,6 +39,8 @@
  */
 
 import type { EventEmitter } from "node:events";
+import type { RandomSource } from "@browsercore/transport";
+import { nodeRandomSource } from "@browsercore/transport";
 import {
     Http3FrameType,
     Http3Settings,
@@ -634,7 +636,7 @@ export class Http3ConnectionImpl implements Http3Connection {
  * awaits the peer's SETTINGS.
  */
 export async function connectHttp3(options: Http3Options): Promise<Http3Connection> {
-    const id = `http3_${Date.now().toString(36)}`;
+    const id = generateHttp3Id(options.random ?? nodeRandomSource);
     const timeoutMs = options.settingsAckTimeoutMs ?? DEFAULT_SETTINGS_ACK_TIMEOUT_MS;
     // The QUIC handshake must complete before we exchange HTTP/3 SETTINGS —
     // until it resolves the connection is unprotected and frames must not be
@@ -644,6 +646,22 @@ export async function connectHttp3(options: Http3Options): Promise<Http3Connecti
     const conn = new Http3ConnectionImpl(id, options);
     await conn.doHandshake(timeoutMs);
     return conn;
+}
+
+/**
+ * Generate a human-readable connection id from random bytes.
+ *
+ * HTTP/3 stream ids are sequential by QUIC spec (client-initiated
+ * bidirectional streams are 0, 2, 4, …), so the randomness goes into the
+ * opaque connection identifier used for logging / correlation instead.
+ */
+function generateHttp3Id(random: RandomSource): string {
+    const bytes = random.randomBytes(8);
+    let hex = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+        hex += (bytes[i] ?? 0).toString(16).padStart(2, "0");
+    }
+    return `http3_${hex}`;
 }
 
 // Re-export for callers/tests that want the frame reader.
