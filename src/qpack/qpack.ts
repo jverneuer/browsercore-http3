@@ -301,9 +301,9 @@ export class QpackDecoder {
     }
 
     private decodeLiteralNameRef(reader: ByteReader, base: number): HeaderField {
-        // Layout: 0 1 N T <NameIdx 4+>. T (bit 5) selects static vs dynamic.
+        // Layout: 0 1 N T <NameIdx 4+>. T (bit 4) selects static vs dynamic.
         const first = reader.peek();
-        const t = (first & 0x20) !== 0;
+        const t = (first & 0x10) !== 0;
         const index = readPrefixedInt(reader, 4);
         const value = readStringLiteral(reader);
         if (t) {
