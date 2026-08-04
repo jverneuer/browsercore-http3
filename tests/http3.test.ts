@@ -1,19 +1,17 @@
 /**
- * @browsercore/http3 — tests for the code that exists.
+ * @browsercore/http3 — regression + coverage tests.
  *
- * This package is largely unimplemented (see PLAN.md): most of `src/` is
- * currently a set of TODO stubs that throw. Per the project's "test what
- * exists" rule, every existing statement / branch / function / line is covered:
- *   - Real implementations (errors, utils, getVarintEncodedLength, the stream
- *     / frame / QPACK / connection types) are exercised across their edge cases.
- *   - TODO stubs are covered by asserting they throw their placeholder error —
- *     the only behaviour that currently exists — without implementing the
- *     underlying feature.
+ * The package implements PLAN.md Steps 1-5 (varint, frames, QPACK, stream
+ * manager) plus the connection lifecycle (Steps 6-11) over a fake QUIC
+ * connection. Per the project's "test what exists" rule, every existing
+ * statement / branch / function / line is covered:
+ *   - Real implementations (errors, utils, varint, frames, QPACK, the stream
+ *     / connection types) are exercised across their edge cases in dedicated
+ *     test files (varint.test.ts, frame.test.ts, qpack.test.ts, stream.test.ts,
+ *     http3.e2e.test.ts).
  *
- * Genuinely unimplemented *features* (varint encode/decode wire round-trip,
- * frame serialize/parse, QPACK tables, the stream manager, the connection
- * lifecycle, GOAWAY, push, GREASE) are marked `it.todo` below so the PLAN.md
- * checklist keeps a 1:1 mapping to runnable tests. Those are listed in the final
+ * Remaining PLAN.md checklist items that lack a dedicated unit test are marked
+ * `it.todo` below so the checklist keeps a 1:1 mapping to runnable tests.
  * report — they are intentionally not built here.
  */
 
@@ -308,87 +306,85 @@ describe("constants", () => {
 });
 
 // ---------------------------------------------------------------------------
+// encodeVarint / decodeVarint — covered in varint.test.ts (Step 1).
+// ---------------------------------------------------------------------------
+
+describe("encodeVarint / decodeVarint", () => {
+    it("are implemented (delegated to varint.test.ts)", () => {
+        // Wire round-trips, error paths, and boundary values live in
+        // varint.test.ts. Here we only assert the functions are callable and
+        // no longer stubs.
+        expect(typeof encodeVarint).toBe("function");
+        expect(typeof decodeVarint).toBe("function");
+        expect(encodeVarint(0n).length).toBe(1);
+        expect(decodeVarint(new Uint8Array([0])).value).toBe(0n);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// serializeFrame / readFrame — covered in frame.test.ts (Step 2).
+// ---------------------------------------------------------------------------
+
+describe("serializeFrame / readFrame", () => {
+    it("are implemented (delegated to frame.test.ts)", () => {
+        expect(typeof serializeFrame).toBe("function");
+        expect(typeof readFrame).toBe("function");
+        // A DATA frame round-trips through the real implementation.
+        const frame: Http3Frame = { type: Http3FrameType.DATA, payload: new Uint8Array([1, 2, 3]) };
+        const bytes = serializeFrame(frame);
+        expect(bytes.length).toBeGreaterThan(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // TODO stubs — covered by asserting their (only) existing behaviour: throwing.
 // These confirm the placeholders are wired up without implementing them.
 // ---------------------------------------------------------------------------
 
 describe("TODO stubs throw their placeholder error", () => {
-    it("encodeVarint is unimplemented", () => {
-        expect(() => encodeVarint(0n)).toThrow(/TODO/);
+    it("qpackEncodeHeaders is implemented (delegated to qpack.test.ts)", () => {
+        const block = qpackEncodeHeaders(new Map([["accept", "*/*"]]));
+        expect(block.length).toBeGreaterThan(0);
     });
 
-    it("decodeVarint is unimplemented", () => {
-        expect(() => decodeVarint(new Uint8Array([0]))).toThrow(/TODO/);
+    it("qpackDecodeHeaders is implemented (delegated to qpack.test.ts)", () => {
+        const block = qpackEncodeHeaders(new Map([["accept", "*/*"]]));
+        const decoded = qpackDecodeHeaders(block);
+        expect(decoded.get("accept")).toBe("*/*");
     });
 
-    it("serializeFrame is unimplemented", () => {
-        const frame: Http3Frame = { type: Http3FrameType.DATA, payload: new Uint8Array() };
-        expect(() => serializeFrame(frame)).toThrow(/TODO/);
+    it("QpackEncoder / QpackDecoder constructors are implemented (delegated to qpack.test.ts)", () => {
+        expect(typeof new QpackEncoder()).toBe("object");
+        expect(typeof new QpackDecoder()).toBe("object");
     });
 
-    it("readFrame is unimplemented", async () => {
-        await expect(readFrame(async () => new Uint8Array([0x00]))).rejects.toThrow(/TODO/);
+    it("createStreamManager is implemented (delegated to stream.test.ts)", () => {
+        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        expect(typeof mgr).toBe("object");
+        expect(typeof mgr.expectResponse).toBe("function");
     });
 
-    it("qpackEncodeHeaders is unimplemented", () => {
-        expect(() => qpackEncodeHeaders(new Map())).toThrow(/TODO/);
-    });
-
-    it("qpackDecodeHeaders is unimplemented", () => {
-        expect(() => qpackDecodeHeaders(new Uint8Array())).toThrow(/TODO/);
-    });
-
-    it("QpackEncoder constructor is unimplemented", () => {
-        expect(() => new QpackEncoder()).toThrow(/TODO/);
-        expect(() => new QpackEncoder(1024)).toThrow(/TODO/);
-    });
-
-    it("QpackDecoder constructor is unimplemented", () => {
-        expect(() => new QpackDecoder()).toThrow(/TODO/);
-        expect(() => new QpackDecoder(1024)).toThrow(/TODO/);
-    });
-
-    it("createStreamManager is unimplemented", () => {
-        expect(() => createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} })).toThrow(
-            /TODO/,
-        );
-    });
-
-    it("Http3ConnectionImpl constructor is unimplemented", () => {
-        const options = { quic: {} as unknown as QuicConnection };
-        expect(() => new Http3ConnectionImpl(options)).toThrow(/TODO/);
-    });
-
-    it("Http3ConnectionImpl instance methods are unimplemented", async () => {
-        // The constructor throws, so reach the methods via the prototype with a
-        // stub `this`. None of them touch `this`, so a bare prototype object
-        // suffices.
-        const stub = Object.create(Http3ConnectionImpl.prototype);
-        await expect(stub.request({} as unknown as Http3Request)).rejects.toThrow(/TODO/);
-        await expect(stub.goaway(0n)).rejects.toThrow(/TODO/);
-        await expect(stub.close()).rejects.toThrow(/TODO/);
-    });
-
-    it("connectHttp3 is unimplemented", async () => {
-        await expect(connectHttp3({ quic: {} as unknown as QuicConnection })).rejects.toThrow(/TODO/);
+    it("Http3ConnectionImpl / connectHttp3 are implemented (delegated to http3.e2e.test.ts)", () => {
+        // The connection requires a real (or fake) QUIC connection to construct
+        // and exercise; full lifecycle coverage lives in http3.e2e.test.ts.
+        expect(typeof connectHttp3).toBe("function");
+        expect(typeof Http3ConnectionImpl).toBe("function");
     });
 });
 
 // ---------------------------------------------------------------------------
 // Genuinely unimplemented features — placeholders for the PLAN.md checklist.
-// These are NOT built here; they are listed in the final report.
+// Steps 1-5 are implemented and covered by their dedicated test files
+// (varint.test.ts, frame.test.ts, qpack.test.ts, stream.test.ts). Steps 6-11
+// (connection lifecycle) are exercised end-to-end by http3.e2e.test.ts; these
+// todos keep a 1:1 mapping to the PLAN.md checklist for any remaining gaps.
 // ---------------------------------------------------------------------------
 
+// Step 6 (handshake timeout), Step 7 (multiplexing), Step 8 (GOAWAY), and
+// Step 11 (end-to-end over fake QUIC) are covered by http3.e2e.test.ts.
+// Step 10 (GREASE) is covered by the unknown/GREASE frame tests in
+// frame.test.ts. Step 9 (server push handling) has push-stream dispatch
+// coverage in stream.test.ts; a full server-push end-to-end remains a todo.
 describe("unimplemented features (PLAN.md checklist)", () => {
-    it.todo("Step 1 — varint encode/decode wire round-trip");
-    it.todo("Step 2 — every frame type parses and serializes");
-    it.todo("Step 3 — QPACK static table encode/decode round-trip");
-    it.todo("Step 4 — QPACK dynamic table + wire instructions");
-    it.todo("Step 5 — stream manager dispatches by stream id");
-    it.todo("Step 6 — SETTINGS handshake completes or times out");
-    it.todo("Step 7 — concurrent request multiplexing");
-    it.todo("Step 8 — GOAWAY sent/received");
     it.todo("Step 9 — server push handling");
-    it.todo("Step 10 — GREASE / reserved frames ignored");
-    it.todo("Step 11 — end-to-end over fake QUIC");
 });

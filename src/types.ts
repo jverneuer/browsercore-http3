@@ -110,6 +110,13 @@ export const Http3FrameType = {
 
 export type Http3FrameTypeValue = (typeof Http3FrameType)[keyof typeof Http3FrameType];
 
+/**
+ * Sentinel `type` for a frame whose type is not one of the known variants
+ * (GREASE / reserved types per RFC 9114 §7.1). Negative so it can never
+ * collide with a real (non-negative) IANA frame type.
+ */
+export const HTTP3_UNKNOWN_FRAME_TYPE = -1;
+
 // ---------------------------------------------------------------------------
 // HTTP/3 SETTINGS identifiers (RFC 9114 §7.2.4) — encoded as a varint
 // ---------------------------------------------------------------------------
@@ -174,6 +181,18 @@ export interface Http3MaxPushIdFrame extends BaseHttp3Frame {
     readonly pushId: bigint;
 }
 
+/**
+ * A frame whose type is not one of the known variants — a GREASE or reserved
+ * type (RFC 9114 §7.1). The payload is retained verbatim so callers that wish
+ * to forward it can; consumers MUST ignore it. `rawType` preserves the wire
+ * type so logs/tests can see what arrived.
+ */
+export interface Http3UnknownFrame {
+    readonly type: typeof HTTP3_UNKNOWN_FRAME_TYPE;
+    readonly rawType: number;
+    readonly payload: Bytes;
+}
+
 /** Every HTTP/3 frame variant — exhaustive discriminated union. */
 export type Http3Frame =
     | Http3DataFrame
@@ -182,7 +201,8 @@ export type Http3Frame =
     | Http3SettingsFrame
     | Http3PushPromiseFrame
     | Http3GoawayFrame
-    | Http3MaxPushIdFrame;
+    | Http3MaxPushIdFrame
+    | Http3UnknownFrame;
 
 // ---------------------------------------------------------------------------
 // QPACK (RFC 9204) — wire instructions on unidirectional streams
