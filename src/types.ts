@@ -191,7 +191,7 @@ export type Http3Frame =
 /** A QPACK encoder instruction (writes to the QPACK encoder stream). */
 export type QpackEncoderInstruction =
     | { readonly kind: "setDynamicTableCapacity"; readonly capacity: number }
-    | { readonly kind: "insertWithNameReference"; readonly nameIndex: number; readonly value: Bytes }
+    | { readonly kind: "insertWithNameReference"; readonly nameIndex: number; readonly value: Bytes; readonly static: boolean }
     | { readonly kind: "insertWithoutNameReference"; readonly name: Bytes; readonly value: Bytes }
     | { readonly kind: "duplicate"; readonly index: number };
 
