@@ -26,7 +26,9 @@
 import type { EventEmitter } from "node:events";
 import {
     Http3FrameType,
+    systemClock,
     type Bytes,
+    type Clock,
     type Http3Connection,
     type Http3Options,
     type Http3Request,
@@ -64,6 +66,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private readonly quic: QuicConnection;
     private readonly qpackDec: QpackDecoder;
     private readonly manager: ReturnType<typeof createStreamManager> & EventEmitter;
+    private readonly clock: Clock;
 
     /** Our control + QPACK streams (written to). */
     private controlStream: QuicStream | undefined;
@@ -85,6 +88,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.id = id;
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
+        this.clock = options.clock ?? systemClock;
         this.qpackDec = new QpackDecoder();
         this.manager = createStreamManager({
             sendGoaway: (streamId) => {
@@ -264,6 +268,8 @@ export class Http3ConnectionImpl implements Http3Connection {
                 for (;;) {
                     // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
                     const frame = await reader.readFrame();
+                    // eslint-disable-next-line no-console
+                    console.error("BIDI", streamId.toString(), frame.type);
                     this.manager.dispatchRequestFrame(streamId, frame);
                 }
             } catch {
@@ -418,6 +424,8 @@ export class Http3ConnectionImpl implements Http3Connection {
                 for (;;) {
                     // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
                     const frame = await reader.readFrame();
+                    // eslint-disable-next-line no-console
+                    console.error("PUSH", pushId.toString(), frame.type);
                     this.manager.dispatchPushFrame(pushId, frame);
                 }
             } catch {

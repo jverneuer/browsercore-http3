@@ -231,6 +231,39 @@ export interface HeaderField {
 export type HeaderBlock = Bytes;
 
 // ---------------------------------------------------------------------------
+// Clock abstraction (injected — decouples protocol code from wall-clock time)
+// ---------------------------------------------------------------------------
+
+/**
+ * Time-source abstraction for HTTP/3 internals. Injected via {@link Http3Options}
+ * so callers can substitute a deterministic clock in tests instead of relying on
+ * the wall clock (`Date.now()` / `setTimeout`). The default is {@link systemClock},
+ * backed by the platform primitives.
+ *
+ * `setTimeout` returns a disposer rather than an opaque handle: a timer and its
+ * cancellation are a single unit, so the handle never escapes into protocol code
+ * and a fake clock can back both with plain data structures — no platform cast.
+ */
+export interface Clock {
+    /** Milliseconds since epoch — mirrors `Date.now()`. */
+    now(): number;
+    /**
+     * Schedule `callback` after `delayMs`. Returns a disposer that cancels the
+     * pending timer when called — mirrors `setTimeout`/`clearTimeout` as one op.
+     */
+    setTimeout(callback: () => void, delayMs: number): () => void;
+}
+
+/** The platform-backed default clock — `Date.now()` + `setTimeout`. */
+export const systemClock: Clock = {
+    now: () => Date.now(),
+    setTimeout: (callback, delayMs) => {
+        const timer = setTimeout(callback, delayMs);
+        return () => clearTimeout(timer);
+    },
+};
+
+// ---------------------------------------------------------------------------
 // Request / response / connection contract
 // ---------------------------------------------------------------------------
 
@@ -281,4 +314,9 @@ export interface Http3Options {
     readonly initialSettings?: Http3SettingsMap;
     /** Timeout for receiving the peer's SETTINGS ACK. Default 5000ms. */
     readonly settingsAckTimeoutMs?: number;
+    /**
+     * Time source for the connection. Defaults to {@link systemClock}. Inject a
+     * deterministic clock in tests to control time without real waits.
+     */
+    readonly clock?: Clock;
 }

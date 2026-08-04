@@ -34,9 +34,6 @@ import { GoawayReceivedError, PushCancelledError } from "../errors.js";
 /** Per-bidirectional-stream response accumulation. */
 interface PendingResponse {
     readonly streamId: bigint;
-    /** Whether this resolver backs a client request or a server push. Push ids
-     * and client stream ids share a numeric namespace, so finalize must know
-     * which map owns this entry before deleting it. */
     readonly kind: "request" | "push";
     readonly resolve: (res: Http3Response) => void;
     readonly reject: (err: Error) => void;
@@ -183,8 +180,9 @@ function concatBytes(parts: readonly Bytes[]): Bytes {
 }
 
 /** Placeholder header decoder replaced by the connection via setHeaderDecoder. */
-const defaultHeaderDecoder: HeaderDecoder = (block) => {
+const defaultHeaderDecoder: HeaderDecoder = (block, streamId) => {
     void block;
+    void streamId;
     throw new Error("stream manager: no header decoder set");
 };
 
@@ -192,8 +190,6 @@ const defaultHeaderDecoder: HeaderDecoder = (block) => {
 export function createStreamManager(handlers: StreamManagerHandlers): StreamManager & EventEmitter {
     const emitter = new StreamEventBridge();
 
-    // Highest client stream id registered via expectResponse — used as the
-    // GOAWAY Last Stream ID when the manager initiates graceful shutdown.
     let maxStreamId = 0n;
 
     // streamId → pending response resolver (client-initiated bidirectional streams).
@@ -207,7 +203,7 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
         let statusCode = 200;
         let headers = new Map<string, string>();
         try {
-            headers = new Map(headerDecoder(p.headerBlock));
+            headers = new Map(headerDecoder(p.headerBlock, p.streamId));
         } catch {
             // Header decode failure surfaces as a 500-style error to the caller.
             p.reject(new Error("QPACK decode failed"));
@@ -272,9 +268,6 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
                 break;
         }
         if (p.headersComplete && p.endStreamSeen) {
-            // The owning map is determined by kind, not by probing pending —
-            // push ids and client stream ids share a numeric namespace, so
-            // pending.has(pushId) can be true while the push is still in pushes.
             if (p.kind === "request") {
                 pending.delete(p.streamId);
             } else {
@@ -359,8 +352,6 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
     }
 
     function abortAll(error: Error): void {
-        // Signal graceful shutdown to the peer (GOAWAY) and cancel any pushes
-        // we accepted but never delivered (CANCEL_PUSH) before dropping resolvers.
         void handlers.sendGoaway(maxStreamId);
         for (const pushId of pushes.keys()) {
             void handlers.sendCancelPush(pushId);
