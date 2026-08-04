@@ -77,3 +77,19 @@ compression-only, and there is no PING frame), so the package has no runtime
 dependency on any other `@browsercore/*` package.
 
 No other `@browsercore/*` packages are imported.
+
+## Position in BrowserCore
+
+```
+Application
+      │
+   @browsercore/http3
+      │
+   @browsercore/quic
+      │
+     UDP
+      │
+      IP
+```
+
+Every higher networking layer communicates with the network exclusively through the layers below it.
