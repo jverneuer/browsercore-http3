@@ -52,6 +52,7 @@ import {
 } from "./tables.js";
 
 export type { HeaderField, HeaderBlock };
+export { DynamicTable as QpackDynamicTable } from "./dynamic-table.js";
 
 // ---------------------------------------------------------------------------
 // Encoded field-section prefix (RFC 9204 §4.5.1)
