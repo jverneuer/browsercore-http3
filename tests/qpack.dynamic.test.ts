@@ -421,6 +421,52 @@ describe("QpackDynamicTable — edge cases", () => {
         expect(table.getByAbsoluteIndex(-1)).toBeUndefined();
         expect(table.getByAbsoluteIndex(99)).toBeUndefined();
     });
+
+    it("capacity getter reflects the current capacity", () => {
+        const table = new QpackDynamicTable(1024);
+        expect(table.capacity).toBe(1024);
+        table.setCapacity(512);
+        expect(table.capacity).toBe(512);
+        table.setCapacity(0);
+        expect(table.capacity).toBe(0);
+    });
+
+    it("getByAbsoluteIndex returns undefined after entries are evicted (stale insert count)", () => {
+        // After eviction, nextAbsoluteIndex stays high while entries becomes empty.
+        // getByAbsoluteIndex with an index in [0, nextAbsoluteIndex) reaches line 79,
+        // where entries[0] is undefined — exercising the `?? 0` nullish fallback.
+        const table = new QpackDynamicTable(1024);
+        table.insert("a", "1");
+        table.insert("b", "2");
+        table.setCapacity(0);
+        expect(table.length).toBe(0);
+        expect(table.insertCount).toBe(2);
+        // Absolute index 0 is < insertCount(2) but entries[0] is gone.
+        expect(table.getByAbsoluteIndex(0)).toBeUndefined();
+        expect(table.getByAbsoluteIndex(1)).toBeUndefined();
+    });
+
+    it("evictToFit breaks when entries is empty but totalSize is stale (defensive)", () => {
+        // The `break` inside evictToFit guards against an inconsistent state where
+        // entries is empty while totalSize > 0. Through the public API these stay
+        // in sync, so we construct the state directly to exercise the defensive branch.
+        const table = new QpackDynamicTable(1024);
+        table.insert("a", "1");
+        const internal = table as unknown as {
+            entries: unknown[];
+            totalSize: number;
+            capacityValue: number;
+            evictToFit(requiredSpace: number): void;
+        };
+        // Force entries empty and capacity to 0 while leaving totalSize positive,
+        // so the while condition (totalSize > 0 && totalSize + 0 > 0) is true.
+        internal.entries = [];
+        internal.capacityValue = 0;
+        expect(internal.totalSize).toBeGreaterThan(0);
+        // Must not hang or throw — the defensive break exits the loop.
+        internal.evictToFit(0);
+        expect(table.size).toBeGreaterThan(0);
+    });
 });
 
 describe("STATIC_TABLE", () => {
