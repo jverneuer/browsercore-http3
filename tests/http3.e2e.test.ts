@@ -13,6 +13,9 @@ describe("HTTP/3 end-to-end over fake QUIC (Step 11)", () => {
     it("completes the SETTINGS handshake and serves a request", async () => {
         const quic = new FakeQuic();
         const serverDone = driveFakeServer(quic.server);
+        // Signal that the QUIC handshake is complete so connectHttp3 may begin
+        // the HTTP/3 SETTINGS exchange over the protected connection.
+        quic.completeHandshake();
 
         const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
 
@@ -35,6 +38,7 @@ describe("HTTP/3 end-to-end over fake QUIC (Step 11)", () => {
     it("multiplexes concurrent requests over separate streams", async () => {
         const quic = new FakeQuic();
         const serverDone = driveFakeServer(quic.server);
+        quic.completeHandshake();
         const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
 
         const paths = ["/a", "/b", "/c"];
@@ -63,6 +67,7 @@ describe("HTTP/3 end-to-end over fake QUIC (Step 11)", () => {
     it("sends a GOAWAY frame on graceful shutdown", async () => {
         const quic = new FakeQuic();
         const serverDone = driveFakeServer(quic.server);
+        quic.completeHandshake();
         const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
 
         await conn.request({

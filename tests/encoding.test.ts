@@ -161,6 +161,31 @@ describe("writeStringLiteral / readStringLiteral (H=1 Huffman)", () => {
     });
 });
 
+describe("huffmanEncode — defensive invalid-byte error (encoding.ts:86)", () => {
+    it("throws QpackDecodeError when a byte value is not in HUFFMAN_TABLE", () => {
+        // All byte values 0-255 are present in HUFFMAN_TABLE, and index 256 is
+        // the defined EOS entry. The defensive throw at encoding.ts:86 is only
+        // reachable with an index > 256 — which a real Uint8Array cannot hold
+        // (its values are always 0-255). Bypass the type to exercise the branch.
+        expect(() => huffmanEncode([257] as unknown as Uint8Array)).toThrow(QpackDecodeError);
+    });
+});
+
+describe("readStringLiteral — multi-byte length prefix (encoding.ts:259-264)", () => {
+    it("decodes a string whose Huffman-encoded length forces a multi-byte length prefix", () => {
+        // A string of 250 'a's Huffman-encodes to 157 bytes, which exceeds the
+        // 7-bit prefix max (127). writeStringLiteral then emits a multi-byte
+        // length prefix (0xff, 0x1e), forcing readStringLiteral to take the
+        // length === max branch (encoding.ts:259-264) to recover the length.
+        const longValue = "a".repeat(250);
+        const w = new ByteWriter();
+        writeStringLiteral(w, longValue);
+        const bytes = w.toBytes();
+        expect(bytes[0]).toBe(0xff); // length prefix hit 7-bit max -> multi-byte
+        expect(readStringLiteral(new ByteReader(bytes))).toBe(longValue);
+    });
+});
+
 describe("readTaggedStringLiteral", () => {
     it("round-trips a tagged (n-bit prefix) string", () => {
         const nameBytes = new TextEncoder().encode("custom-key");

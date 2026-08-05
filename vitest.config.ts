@@ -1,19 +1,8 @@
-import { defineConfig } from "vitest/config";
+import { definePackageConfig } from "@browsercore/dev/vitest";
 
-export default defineConfig({
-    test: {
-        name: "http3",
-        root: ".",
-        include: ["tests/**/*.test.ts"],
-        environment: "node",
-        globals: false,
-        testTimeout: 30_000,
-        hookTimeout: 30_000,
-        coverage: {
-            provider: "v8",
-            include: ["src/**/*.ts"],
-            all: true,
-            reporter: ["text", "html", "json-summary"],
-        },
+export default definePackageConfig({
+    name: "@browsercore/http3",
+    coverage: {
+        thresholds: { statements: 94, branches: 93, functions: 94, lines: 94 },
     },
 });

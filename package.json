@@ -1,6 +1,6 @@
 {
     "name": "@browsercore/http3",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "HTTP/3 framing + QPACK over QUIC streams. No knowledge of UDP, QUIC internals, or TLS — only HTTP/3 wire format over a QUIC connection.",
     "repository": {
         "type": "git",
@@ -22,6 +22,7 @@
     },
     "files": [
         "dist",
+        "bin",
         "LICENSE",
         "README.md"
     ],
@@ -35,12 +36,15 @@
         "prepublishOnly": "npm run clean && npm run build",
         "typecheck": "tsc -p tsconfig.json --noEmit",
         "lint": "oxlint --type-aware src/",
-        "test": "vitest run"
+        "test": "vitest run",
+        "coverage-md": "./bin/coverage-md.mjs"
     },
     "dependencies": {
-        "@browsercore/quic": "0.2.1"
+        "@browsercore/quic": "0.2.1",
+        "@browsercore/transport": "^0.2.0"
     },
     "devDependencies": {
+        "@browsercore/dev": "latest",
         "@types/node": "^26.1.2",
         "@vitest/coverage-v8": "^4.1.10",
         "oxlint": "^1.76.0",

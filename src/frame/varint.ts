@@ -11,6 +11,10 @@
  */
 
 import { VARINT_MAX, type Bytes } from "../types.js";
+import { assertNever } from "../utils.js";
+
+/** The only valid varint encoded lengths (RFC 9000 §16). */
+type VarintLength = 1 | 2 | 4 | 8;
 
 /** A varint that has been decoded from the wire, plus the bytes it occupied. */
 export interface DecodedVarint {
@@ -19,7 +23,7 @@ export interface DecodedVarint {
 }
 
 /** Return the number of bytes needed to encode `value` as a varint. */
-export function getVarintEncodedLength(value: bigint): number {
+export function getVarintEncodedLength(value: bigint): VarintLength {
     if (value < 0n) {
         throw new RangeError(`varint cannot be negative: ${value}`);
     }
@@ -38,10 +42,13 @@ export function getVarintEncodedLength(value: bigint): number {
     return 8;
 }
 
-/** Encode a varint to its wire representation. */
-export function encodeVarint(value: bigint): Bytes {
-    const length = getVarintEncodedLength(value);
-    const out = new Uint8Array(length);
+/**
+ * Write a varint's payload into a pre-allocated buffer of the correct length.
+ * The switch is exhaustive over {@link VarintLength}; the `default` is a
+ * compile-time exhaustiveness guard. Exported so the guard is independently
+ * testable (via cast) — matching the quic package's `encodeVarintInto`.
+ */
+export function writeVarint(out: Bytes, value: bigint, length: VarintLength): void {
     switch (length) {
         case 1:
             out[0] = Number(value);
@@ -67,37 +74,26 @@ export function encodeVarint(value: bigint): Bytes {
             out[7] = Number(value & 0xffn);
             break;
         default:
-            // Unreachable: getVarintEncodedLength only returns 1/2/4/8.
-            throw new RangeError(`varint encode: bad length ${length}`);
+            // Exhaustiveness guard: VarintLength is 1 | 2 | 4 | 8, all handled above.
+            assertNever(length);
     }
+}
+
+/** Encode a varint to its wire representation. */
+export function encodeVarint(value: bigint): Bytes {
+    const length = getVarintEncodedLength(value);
+    const out = new Uint8Array(length);
+    writeVarint(out, value, length);
     return out;
 }
 
 /**
- * Decode a varint from the start of `buf`. Returns the value and the number of
- * bytes consumed. Throws RangeError if the buffer is too short to hold the
- * encoded varint.
+ * Read a varint payload from a byte source using the bounds-safe `at`
+ * accessor. The switch is exhaustive over {@link VarintLength}; the `default`
+ * is a compile-time exhaustiveness guard. Exported so the guard is
+ * independently testable (via cast).
  */
-export function decodeVarint(buf: Bytes): DecodedVarint {
-    if (buf.length === 0) {
-        throw new RangeError("varint decode: empty buffer");
-    }
-    const first = buf[0];
-    if (first === undefined) {
-        throw new RangeError("varint decode: empty buffer");
-    }
-    const prefix = first >> 6;
-    const length = 1 << prefix; // 1, 2, 4, or 8
-    if (buf.length < length) {
-        throw new RangeError("varint decode: buffer too short");
-    }
-    // The length check above guarantees indices 0..length-1 are in bounds.
-    // Provide a bounds-safe accessor so indexing needs no non-null assertion
-    // under noUncheckedIndexedAccess.
-    const at = (i: number): number => {
-        const v = buf[i];
-        return v ?? 0;
-    };
+export function readVarintPayload(at: (i: number) => number, length: VarintLength): bigint {
     const masked = BigInt(at(0) & 0x3f);
     let value: bigint;
     switch (length) {
@@ -126,8 +122,36 @@ export function decodeVarint(buf: Bytes): DecodedVarint {
                 BigInt(at(7));
             break;
         default:
-            // Unreachable: prefix is 2 bits so length is always 1/2/4/8.
-            throw new RangeError(`varint decode: bad prefix ${prefix}`);
+            // Exhaustiveness guard: VarintLength is 1 | 2 | 4 | 8, all handled above.
+            assertNever(length);
     }
+    return value;
+}
+
+/**
+ * Decode a varint from the start of `buf`. Returns the value and the number of
+ * bytes consumed. Throws RangeError if the buffer is too short to hold the
+ * encoded varint.
+ */
+export function decodeVarint(buf: Bytes): DecodedVarint {
+    if (buf.length === 0) {
+        throw new RangeError("varint decode: empty buffer");
+    }
+    // buf.length > 0 guarantees buf[0] is defined; fall back to 0 to satisfy
+    // noUncheckedIndexedAccess without a non-null assertion.
+    const first = buf[0] ?? 0;
+    const prefix = first >> 6;
+    const length: VarintLength = (1 << prefix) as VarintLength; // 1, 2, 4, or 8
+    if (buf.length < length) {
+        throw new RangeError("varint decode: buffer too short");
+    }
+    // The length check above guarantees indices 0..length-1 are in bounds.
+    // Provide a bounds-safe accessor so indexing needs no non-null assertion
+    // under noUncheckedIndexedAccess.
+    const at = (i: number): number => {
+        const v = buf[i];
+        return v ?? 0;
+    };
+    const value = readVarintPayload(at, length);
     return { value, length };
 }

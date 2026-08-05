@@ -118,6 +118,7 @@ describe("HTTP/3 server push (Step 9)", () => {
     it("resolves a pushed response from a PUSH_PROMISE + push stream", async () => {
         const quic = new FakeQuic();
         const serverDone = drivePushServer(quic.server);
+        quic.completeHandshake();
         const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
         const reqPromise = conn.request({
             method: "GET", scheme: "https", authority: "example.com", path: "/index.html",
@@ -137,6 +138,7 @@ describe("HTTP/3 server push (Step 9)", () => {
     it("rejects push() with PushCancelledError when the peer cancels the push", async () => {
         const quic = new FakeQuic();
         const serverDone = driveCancelPushServer(quic.server);
+        quic.completeHandshake();
         const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
         const reqPromise = conn.request({
             method: "GET", scheme: "https", authority: "example.com", path: "/index.html",

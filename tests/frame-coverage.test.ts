@@ -14,6 +14,7 @@ import { concat } from "../src/utils.js";
 import type {
     Http3Frame, Http3DataFrame, Http3HeadersFrame, Http3CancelPushFrame,
     Http3SettingsFrame, Http3PushPromiseFrame, Http3GoawayFrame, Http3MaxPushIdFrame,
+    Http3UnknownFrame,
 } from "../src/types.js";
 
 const df = (p: Uint8Array): Http3DataFrame => ({ type: Http3FrameType.DATA, payload: p });
@@ -125,6 +126,25 @@ describe("frame serialization", () => {
         expect(serializeFrame(sf({ [Http3Settings.QPACK_MAX_TABLE_CAPACITY]: 50, [Http3Settings.QPACK_BLOCKED_STREAMS]: 10 })))
             .toEqual(new Uint8Array([0x04, 0x04, 0x01, 0x32, 0x07, 0x0a]));
     });
+    it("unknown frame serializes via rawType", () => {
+        // Exercises frameTypeCode's HTTP3_UNKNOWN_FRAME_TYPE branch (frame.ts:83):
+        // the wire `type` comes from rawType, not the discriminant.
+        const frame: Http3UnknownFrame = { type: HTTP3_UNKNOWN_FRAME_TYPE, rawType: 0x2, payload: new Uint8Array([0xaa, 0xbb]) };
+        expect(serializeFrame(frame)).toEqual(new Uint8Array([0x02, 0x02, 0xaa, 0xbb]));
+    });
+    it("skips undefined SETTINGS values defensively", () => {
+        // Object.entries yields `number | undefined` on a Partial record. Inject an
+        // undefined value to exercise the `typeof value !== "number"` skip branch.
+        const frame: Http3SettingsFrame = { type: Http3FrameType.SETTINGS, settings: {} };
+        (frame.settings as Record<number, number | undefined>)[Http3Settings.QPACK_MAX_TABLE_CAPACITY] = undefined;
+        expect(serializeFrame(frame)).toEqual(new Uint8Array([0x04, 0x00]));
+    });
+    it("throws on an unhandled frame type (exhaustiveness guard)", () => {
+        // All legitimate Http3Frame variants are handled; reach the default branch
+        // (the `never` exhaustiveness guard) by feeding an unrecognized type.
+        const badFrame = { type: 0x99, payload: new Uint8Array() } as any as Http3Frame;
+        expect(() => serializeFrame(badFrame)).toThrow(/Unexpected value/);
+    });
 });
 
 describe("frame parsing round-trips", () => {
@@ -215,6 +235,16 @@ describe("frame error paths", () => {
     it("truncated CANCEL_PUSH", async () => { await expect(readFrame(oneShot(new Uint8Array([0x03, 0x02, 0x40])))).rejects.toThrow(FrameParseError); });
     it("truncated GOAWAY", async () => { await expect(readFrame(oneShot(new Uint8Array([0x07, 0x04, 0x80])))).rejects.toThrow(FrameParseError); });
     it("truncated MAX_PUSH_ID", async () => { await expect(readFrame(oneShot(new Uint8Array([0x0d, 0x08, 0xc0])))).rejects.toThrow(FrameParseError); });
+    it("frame length exceeding MAX_SAFE_INTEGER throws FrameParseError", async () => {
+        // The length varint encodes a value > Number.MAX_SAFE_INTEGER. readBytes
+        // must reject it (the only remaining MAX_SAFE_INTEGER guard after the
+        // redundant readFrame check was removed). An 8-byte varint with the top
+        // prefix decodes to a value in [2^62-2^56, 2^62-1], all > MAX_SAFE_INTEGER.
+        const typeVarint = encodeVarint(BigInt(Http3FrameType.DATA));
+        const hugeLength = new Uint8Array([0xc0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+        const bytes = concat(typeVarint, hugeLength);
+        await expect(readFrame(oneShot(bytes))).rejects.toThrow(FrameParseError);
+    });
 });
 
 describe("GREASE frames (RFC 9114 §7.1, §7.2.8)", () => {

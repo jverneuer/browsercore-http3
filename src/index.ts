@@ -15,6 +15,8 @@ export {
     QpackDecodeError,
     SettingsAckTimeoutError,
     SettingsViolationError,
+    ConnectionClosingError,
+    ConnectionClosedError,
 } from "./errors.js";
 
 export {
@@ -53,21 +55,29 @@ export {
 export type { HeaderField, HeaderBlock } from "./qpack/qpack.js";
 
 export { createStreamManager } from "./stream/stream.js";
-export type { Http3Stream, StreamManager, StreamManagerHandlers } from "./stream/stream.js";
+export type {
+    Http3ManagerEventValue,
+    Http3Stream,
+    StreamManager,
+    StreamManagerHandlers,
+} from "./stream/stream.js";
 
 export {
+    type ConnectionId,
     type Http3Connection,
     type Http3Options,
     type Http3Request,
     type Http3Response,
+    type Logger,
     type QuicConnection,
     type QuicCloseReason,
     type QuicStream,
 } from "./types.js";
+export { silentLogger, devLogger } from "./types.js";
 
-export { decodeVarint, encodeVarint, getVarintEncodedLength } from "./frame/varint.js";
+export { decodeVarint, encodeVarint, getVarintEncodedLength, readVarintPayload, writeVarint } from "./frame/varint.js";
 export type { DecodedVarint } from "./frame/varint.js";
 export { VARINT_MAX } from "./types.js";
 export type { Bytes } from "./types.js";
 
-export { assertNever } from "./utils.js";
+export { assertNever, createId } from "./utils.js";

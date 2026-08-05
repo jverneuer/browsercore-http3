@@ -28,12 +28,33 @@ import {
     type Bytes,
     type Http3Frame,
     type Http3Response,
+    type Http3StreamId,
 } from "../types.js";
 import { GoawayReceivedError, PushCancelledError } from "../errors.js";
+import { assertNever } from "../utils.js";
+
+/**
+ * Stream-manager event names (discriminated union of the events the manager
+ * emits). Centralised here so handlers and emitters share one source of truth.
+ */
+export const Http3ManagerEvent = {
+    /** A PUSH_PROMISE arrived on a request stream — payload is the QPACK block. */
+    PushPromise: "pushPromise",
+    /** The peer's SETTINGS frame arrived (handshake completion signal). */
+    Settings: "settings",
+    /** The peer sent a GOAWAY — `detail` is the last acceptable stream id. */
+    Goaway: "goaway",
+    /** The peer sent a MAX_PUSH_ID frame — `detail` is the new max push id. */
+    MaxPushId: "maxPushId",
+} as const;
+
+export type Http3ManagerEventValue =
+    (typeof Http3ManagerEvent)[keyof typeof Http3ManagerEvent];
 
 /** Per-bidirectional-stream response accumulation. */
 interface PendingResponse {
-    readonly streamId: bigint;
+    readonly streamId: Http3StreamId;
+    readonly kind: "request" | "push";
     readonly resolve: (res: Http3Response) => void;
     readonly reject: (err: Error) => void;
     headerBlock: Bytes;
@@ -45,7 +66,7 @@ interface PendingResponse {
 /** A single HTTP/3 request/response exchange on a bidirectional stream. */
 export interface Http3Stream {
     /** QUIC stream id (62-bit, client-initiated streams are even). */
-    readonly id: bigint;
+    readonly id: Http3StreamId;
     /** True once the request's END-of-DATA was written. */
     readonly requestComplete: boolean;
     /** True once the response HEADERS arrived. */
@@ -58,50 +79,55 @@ export interface Http3Stream {
  */
 export interface StreamManagerHandlers {
     /** Send a GOAWAY frame, announcing the last acceptable stream id. */
-    readonly sendGoaway: (streamId: bigint) => void;
+    readonly sendGoaway: (streamId: Http3StreamId) => void;
     /** Send a CANCEL_PUSH frame for the given push id. */
     readonly sendCancelPush: (pushId: bigint) => void;
     /** Emit a response HEADERS frame's decoded status for the connection. */
-    readonly onResponseHeaders?: (streamId: bigint, statusCode: number) => void;
+    readonly onResponseHeaders?: (streamId: Http3StreamId, statusCode: number) => void;
 }
 
 /** A handle the stream manager exposes to the connection for sending. */
 export interface StreamManager {
     /** Register the response resolver for a client-opened bidirectional stream. */
     expectResponse(
-        streamId: bigint,
+        streamId: Http3StreamId,
         resolve: (res: Http3Response) => void,
         reject: (err: Error) => void,
     ): void;
 
     /** Register the pushed-response resolver for a server push (push id == stream id). */
     expectPush(
-        pushId: bigint,
+        pushId: Http3StreamId,
         resolve: (res: Http3Response) => void,
         reject: (err: Error) => void,
     ): void;
 
     /** Dispatch a frame read from a bidirectional (request) stream. */
-    dispatchRequestFrame(streamId: bigint, frame: Http3Frame): void;
+    dispatchRequestFrame(streamId: Http3StreamId, frame: Http3Frame): void;
 
     /** Dispatch a frame read from the control stream. */
     dispatchControlFrame(frame: Http3Frame): void;
 
     /** Dispatch a frame read from a push stream (push id == stream id). */
-    dispatchPushFrame(streamId: bigint, frame: Http3Frame): void;
+    dispatchPushFrame(streamId: Http3StreamId, frame: Http3Frame): void;
 
     /** Reject every in-flight request with `error`. */
     abortAll(error: Error): void;
+
+    /** Reject a single in-flight request by stream id (Stream Cancellation). */
+    cancelStream(streamId: bigint, error: Error): void;
 
     /** Set the QPACK header-block decoder used for response HEADERS frames. */
     setHeaderDecoder(decoder: HeaderDecoder): void;
 }
 
 /**
- * Decode a QPACK header block into a header map. The connection injects its
+ * Decode a QPACK header block into a header map. The `streamId` is the
+ * stream the block was received on, so the decoder can emit per-stream
+ * Section Acknowledgments (RFC 9204 §4.4.1). The connection injects its
  * {@link QpackDecoder} here; the manager stays decoupled from QPACK internals.
  */
-export type HeaderDecoder = (block: Bytes) => ReadonlyMap<string, string>;
+export type HeaderDecoder = (block: Bytes, streamId: bigint) => ReadonlyMap<string, string>;
 
 /**
  * Minimal EventEmitter-shaped facade over the platform {@link EventTarget}.
@@ -179,20 +205,22 @@ function concatBytes(parts: readonly Bytes[]): Bytes {
 }
 
 /** Placeholder header decoder replaced by the connection via setHeaderDecoder. */
-const defaultHeaderDecoder: HeaderDecoder = (block) => {
+const defaultHeaderDecoder: HeaderDecoder = (block, streamId) => {
     void block;
+    void streamId;
     throw new Error("stream manager: no header decoder set");
 };
 
 /** Create a stream manager bound to the connection's frame I/O. */
-export function createStreamManager(_handlers: StreamManagerHandlers): StreamManager & EventEmitter {
-    void _handlers;
+export function createStreamManager(handlers: StreamManagerHandlers): StreamManager & EventEmitter {
     const emitter = new StreamEventBridge();
 
+    let maxStreamId = 0n;
+
     // streamId → pending response resolver (client-initiated bidirectional streams).
-    const pending = new Map<bigint, PendingResponse>();
+    const pending = new Map<Http3StreamId, PendingResponse>();
     // pushId → pending pushed response resolver.
-    const pushes = new Map<bigint, PendingResponse>();
+    const pushes = new Map<Http3StreamId, PendingResponse>();
 
     let headerDecoder: HeaderDecoder = defaultHeaderDecoder;
 
@@ -200,7 +228,7 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         let statusCode = 200;
         let headers = new Map<string, string>();
         try {
-            headers = new Map(headerDecoder(p.headerBlock));
+            headers = new Map(headerDecoder(p.headerBlock, p.streamId));
         } catch {
             // Header decode failure surfaces as a 500-style error to the caller.
             p.reject(new Error("QPACK decode failed"));
@@ -216,13 +244,15 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         p.resolve({ statusCode, headers, body: concatBytes(p.body) });
     }
 
-    function dispatchRequestFrame(streamId: bigint, frame: Http3Frame): void {
+    function dispatchRequestFrame(streamId: Http3StreamId, frame: Http3Frame): void {
         // A PUSH_PROMISE arrives on the request stream that triggered the
         // push. It is not part of the response — emit an event so the
         // connection can accept the corresponding push stream and register a
         // resolver for the pushed response.
         if (frame.type === Http3FrameType.PUSH_PROMISE) {
-            emitter.emit("pushPromise", frame.pushId, frame.payload);
+            // `frame.pushId` is a wire `bigint`; cast to the branded
+            // `Http3StreamId` the connection's event listener expects.
+            emitter.emit(Http3ManagerEvent.PushPromise, frame.pushId as Http3StreamId, frame.payload);
             return;
         }
         const p = pending.get(streamId);
@@ -232,7 +262,7 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         dispatchToPending(p, frame);
     }
 
-    function dispatchPushFrame(streamId: bigint, frame: Http3Frame): void {
+    function dispatchPushFrame(streamId: Http3StreamId, frame: Http3Frame): void {
         const p = pushes.get(streamId);
         if (p === undefined) {
             return;
@@ -263,9 +293,13 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             case Http3FrameType.GOAWAY:
             case Http3FrameType.MAX_PUSH_ID:
                 break;
+            default:
+                // Exhaustiveness guard — forces a compile error if a frame variant
+                // is added without a dispatch branch.
+                assertNever(frame);
         }
         if (p.headersComplete && p.endStreamSeen) {
-            if (pending.has(p.streamId)) {
+            if (p.kind === "request") {
                 pending.delete(p.streamId);
             } else {
                 pushes.delete(p.streamId);
@@ -277,19 +311,20 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     function dispatchControlFrame(frame: Http3Frame): void {
         switch (frame.type) {
             case Http3FrameType.SETTINGS:
-                emitter.emit("settings");
+                emitter.emit(Http3ManagerEvent.Settings);
                 break;
             case Http3FrameType.GOAWAY:
-                emitter.emit("goaway", frame.streamId);
+                emitter.emit(Http3ManagerEvent.Goaway, frame.streamId);
                 break;
             case Http3FrameType.MAX_PUSH_ID:
-                emitter.emit("maxPushId", frame.pushId);
+                emitter.emit(Http3ManagerEvent.MaxPushId, frame.pushId);
                 break;
             case Http3FrameType.CANCEL_PUSH:
                 // The peer is cancelling a pushed resource — reject the pending
                 // push resolver with PushCancelledError so callers can match on
-                // `kind` and clean up.
-                cancelPush(frame.pushId, new PushCancelledError(frame.pushId));
+                // `kind` and clean up. The frame's `pushId` is a wire `bigint`;
+                // cast to the branded `Http3StreamId` the manager expects.
+                cancelPush(frame.pushId as Http3StreamId, new PushCancelledError(frame.pushId));
                 break;
             case HTTP3_UNKNOWN_FRAME_TYPE:
                 break;
@@ -300,16 +335,24 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
             case Http3FrameType.HEADERS:
             case Http3FrameType.PUSH_PROMISE:
                 break;
+            default:
+                // Exhaustiveness guard — forces a compile error if a frame variant
+                // is added without a dispatch branch.
+                assertNever(frame);
         }
     }
 
     function expectResponse(
-        streamId: bigint,
+        streamId: Http3StreamId,
         resolve: (res: Http3Response) => void,
         reject: (err: Error) => void,
     ): void {
+        if (streamId > maxStreamId) {
+            maxStreamId = streamId;
+        }
         pending.set(streamId, {
             streamId,
+            kind: "request",
             resolve,
             reject,
             headerBlock: new Uint8Array(0),
@@ -320,12 +363,13 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     }
 
     function expectPush(
-        pushId: bigint,
+        pushId: Http3StreamId,
         resolve: (res: Http3Response) => void,
         reject: (err: Error) => void,
     ): void {
         pushes.set(pushId, {
             streamId: pushId,
+            kind: "push",
             resolve,
             reject,
             headerBlock: new Uint8Array(0),
@@ -335,7 +379,7 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         });
     }
 
-    function cancelPush(pushId: bigint, error: Error): void {
+    function cancelPush(pushId: Http3StreamId, error: Error): void {
         const p = pushes.get(pushId);
         if (p !== undefined) {
             pushes.delete(pushId);
@@ -344,6 +388,10 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
     }
 
     function abortAll(error: Error): void {
+        handlers.sendGoaway(maxStreamId as Http3StreamId);
+        for (const pushId of pushes.keys()) {
+            handlers.sendCancelPush(pushId);
+        }
         for (const p of pending.values()) {
             p.reject(error);
         }
@@ -354,6 +402,15 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         pushes.clear();
     }
 
+    function cancelStream(streamId: bigint, error: Error): void {
+        const id = streamId as Http3StreamId;
+        const p = pending.get(id);
+        if (p !== undefined) {
+            pending.delete(id);
+            p.reject(error);
+        }
+    }
+
     const manager = {
         expectResponse,
         expectPush,
@@ -361,6 +418,7 @@ export function createStreamManager(_handlers: StreamManagerHandlers): StreamMan
         dispatchControlFrame,
         dispatchPushFrame,
         abortAll,
+        cancelStream,
         setHeaderDecoder(decoder: HeaderDecoder): void {
             headerDecoder = decoder;
         },

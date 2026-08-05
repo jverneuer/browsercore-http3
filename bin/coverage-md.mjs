@@ -1,18 +1,20 @@
+#!/usr/bin/env node
 /**
  * Convert vitest's coverage-summary.json into a markdown coverage table.
  *
- * Run AFTER `./node_modules/.bin/vitest run --coverage` (with the
- * json-summary reporter) so coverage-summary.json exists. Writes COVERAGE.md
- * next to this script (i.e. the package root).
+ * Run AFTER `vitest run --coverage` (with the json-summary reporter) so
+ * coverage-summary.json exists. Writes COVERAGE.md and coverage/badge.json to
+ * the current working directory (the consumer package root).
+ *
+ * Distributed as the `coverage-md` bin of @browsercore/dev, replacing the
+ * per-repo scripts/coverage-md.mjs copies.
  *
  * Dependency-free: only node:fs + node:path. Safe in CI with no install step.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join, posix, relative } from "node:path";
+import { join, relative } from "node:path";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const pkgRoot = join(here, "..");
+const pkgRoot = process.cwd();
 const summaryPath = join(pkgRoot, "coverage", "coverage-summary.json");
 const outPath = join(pkgRoot, "COVERAGE.md");
 const badgePath = join(pkgRoot, "coverage", "badge.json");
@@ -54,12 +56,10 @@ const fileEntries = Object.entries(data)
     })
     .sort((a, b) => a.file.localeCompare(b.file));
 
-const pad = (s, n) => s + " ".repeat(Math.max(0, n - s.length));
-
 const lines = [];
 lines.push(`# Coverage report`);
 lines.push("");
-lines.push(`Generated from \`coverage-summary.json\` by \`scripts/coverage-md.mjs\`.`);
+lines.push(`Generated from \`coverage-summary.json\` by \`coverage-md\` (@browsercore/dev).`);
 lines.push("");
 lines.push(`## Total`);
 lines.push("");

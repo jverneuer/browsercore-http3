@@ -321,15 +321,18 @@ describe("QpackDecoder — decoder-stream instruction emission", () => {
         const { encoderBytes } = enc.encode(new Map([["k", "v"]]));
         dec.consumeEncoderStream(encoderBytes);
         const ici = dec.emitInsertCountIncrement();
-        expect(Array.from(ici)).toEqual([1]);
+        // Wire format (RFC 9204 §4.4.3): 1 <Increment 6+> -> 0x80 | 1 = 0x81.
+        expect(Array.from(ici)).toEqual([0x81]);
     });
 
     it("emits Section Acknowledgment and Stream Cancellation", () => {
         const dec = new QpackDecoder();
         const ack = dec.emitSectionAcknowledgment(10n);
+        // Wire format (RFC 9204 §4.4.1): 0 0 <Stream ID 7+> -> 10.
         expect(Array.from(ack)).toEqual([10]);
         const cancel = dec.emitStreamCancellation(5n);
-        expect(Array.from(cancel)).toEqual([5]);
+        // Wire format (RFC 9204 §4.4.2): 0 1 <Stream ID 6+> -> 0x40 | 5 = 0x45.
+        expect(Array.from(cancel)).toEqual([0x45]);
     });
 });
 
@@ -421,6 +424,52 @@ describe("QpackDynamicTable — edge cases", () => {
         expect(table.getByAbsoluteIndex(-1)).toBeUndefined();
         expect(table.getByAbsoluteIndex(99)).toBeUndefined();
     });
+
+    it("capacity getter reflects the current capacity", () => {
+        const table = new QpackDynamicTable(1024);
+        expect(table.capacity).toBe(1024);
+        table.setCapacity(512);
+        expect(table.capacity).toBe(512);
+        table.setCapacity(0);
+        expect(table.capacity).toBe(0);
+    });
+
+    it("getByAbsoluteIndex returns undefined after entries are evicted (stale insert count)", () => {
+        // After eviction, nextAbsoluteIndex stays high while entries becomes empty.
+        // getByAbsoluteIndex with an index in [0, nextAbsoluteIndex) reaches line 79,
+        // where entries[0] is undefined — exercising the `?? 0` nullish fallback.
+        const table = new QpackDynamicTable(1024);
+        table.insert("a", "1");
+        table.insert("b", "2");
+        table.setCapacity(0);
+        expect(table.length).toBe(0);
+        expect(table.insertCount).toBe(2);
+        // Absolute index 0 is < insertCount(2) but entries[0] is gone.
+        expect(table.getByAbsoluteIndex(0)).toBeUndefined();
+        expect(table.getByAbsoluteIndex(1)).toBeUndefined();
+    });
+
+    it("evictToFit breaks when entries is empty but totalSize is stale (defensive)", () => {
+        // The `break` inside evictToFit guards against an inconsistent state where
+        // entries is empty while totalSize > 0. Through the public API these stay
+        // in sync, so we construct the state directly to exercise the defensive branch.
+        const table = new QpackDynamicTable(1024);
+        table.insert("a", "1");
+        const internal = table as unknown as {
+            entries: unknown[];
+            totalSize: number;
+            capacityValue: number;
+            evictToFit(requiredSpace: number): void;
+        };
+        // Force entries empty and capacity to 0 while leaving totalSize positive,
+        // so the while condition (totalSize > 0 && totalSize + 0 > 0) is true.
+        internal.entries = [];
+        internal.capacityValue = 0;
+        expect(internal.totalSize).toBeGreaterThan(0);
+        // Must not hang or throw — the defensive break exits the loop.
+        internal.evictToFit(0);
+        expect(table.size).toBeGreaterThan(0);
+    });
 });
 
 describe("STATIC_TABLE", () => {
@@ -429,5 +478,167 @@ describe("STATIC_TABLE", () => {
         expect(STATIC_TABLE[1]).toEqual({ name: ":path", value: "/" });
         expect(STATIC_TABLE[25]).toEqual({ name: ":status", value: "200" });
         expect(STATIC_TABLE.length).toBeGreaterThan(90);
+    });
+});
+
+describe("QpackDecoder — multi-byte base delta (deltaBase === max)", () => {
+    it("parses a base delta where low 7 bits equal max (127)", () => {
+        const enc = new QpackEncoder();
+        const dec = new QpackDecoder();
+        enc.applyMaxCapacity(1024);
+        dec.applyMaxCapacity(1024);
+
+        // Insert enough entries so base can be large.
+        const first = enc.encode(new Map([["k", "v"]]));
+        dec.consumeEncoderStream(first.encoderBytes);
+        dec.decode(first.block, first.requiredInsertCount);
+
+        // Manually construct a block with base delta = 0x7f (127 = max),
+        // which triggers the multi-byte continuation loop in readBase.
+        // First byte 0x7f: S=0, deltaBase = 127 = max. Second byte terminates.
+        // With base = 127 and only 1 dynamic entry, any name ref will be
+        // invalid (absolute index out of range), exercising the multi-byte
+        // loop AND the error path.
+        const w = new ByteWriter();
+        w.write(0x00); // RIC = 0
+        w.write(0x7f); // S=0, deltaBase = 127 (max) -> multi-byte loop runs
+        w.write(0x00); // continuation byte (high bit clear), deltaBase stays 127
+        w.write(0x40 | 0x10 | 0); // literal name ref, T=1 (static), index 0
+        w.write(0x01); // value length
+        w.write(0x78); // "x"
+        // base = 127, but only 1 entry exists. Static ref (T=1) to index 0
+        // works regardless, but the multi-byte loop has already run.
+        const decoded = dec.decode(w.toBytes(), 0);
+        expect(decoded.get(":authority")).toBe("x");
+    });
+});
+
+describe("QpackDecoder — invalid dynamic index in literal name ref", () => {
+    it("throws on a literal name ref (T=0) to a non-existent dynamic entry", () => {
+        const enc = new QpackEncoder();
+        const dec = new QpackDecoder();
+        enc.applyMaxCapacity(1024);
+        dec.applyMaxCapacity(1024);
+        // Insert one entry (absolute index 0).
+        const first = enc.encode(new Map([["k", "v"]]));
+        dec.consumeEncoderStream(first.encoderBytes);
+        dec.decode(first.block, first.requiredInsertCount);
+
+        // Literal name ref with T=0 (dynamic), index 5 — absolute = base-1-5
+        // which is out of range (only 1 entry exists).
+        const w = new ByteWriter();
+        w.write(0x00); // RIC = 0
+        w.write(0x00); // S=0, deltaBase = 0 -> base = 0
+        w.write(0x40 | 0x00 | 5); // literal name ref, T=0 (dynamic), index 5
+        w.write(0x01); // value length
+        w.write(0x78); // "x"
+        expect(() => dec.decode(w.toBytes(), 0)).toThrow(/invalid dynamic index/);
+    });
+});
+
+describe("QpackDecoder — invalid post-base index", () => {
+    it("throws on a post-base name ref to a non-existent index", () => {
+        const enc = new QpackEncoder();
+        const dec = new QpackDecoder();
+        enc.applyMaxCapacity(1024);
+        dec.applyMaxCapacity(1024);
+        // Insert one entry.
+        const first = enc.encode(new Map([["k", "v"]]));
+        dec.consumeEncoderStream(first.encoderBytes);
+        dec.decode(first.block, first.requiredInsertCount);
+
+        // Post-base name ref: 0 0 0 0 N T <idx 3+> with index 10 (beyond table).
+        const w = new ByteWriter();
+        w.write(0x01); // RIC = 1
+        w.write(0x00); // S=0, deltaBase = 0 -> base = 1
+        w.write(0x00 | 10); // post-base name ref, index 10
+        w.write(0x01); // value length
+        w.write(0x61); // "a"
+        expect(() => dec.decode(w.toBytes(), 1)).toThrow(/post-base name ref/);
+    });
+});
+
+describe("QpackDecoder — decodeLiteralNameRef error paths", () => {
+    it("throws on a literal name ref (T=1) with invalid static index", () => {
+        // 0 1 N T <NameIdx 4+>: T=1 (static). Index 99 is beyond the table.
+        // Encode index 99 with 4-bit prefixed integer:
+        //   low 4 bits = 15 (max flag) -> 0x0f, continuation follows
+        //   99 - 15 = 84 -> single continuation byte 0x54
+        // Full first byte: 0x40 | 0x10 | 0x0f = 0x5f
+        const w = new ByteWriter();
+        w.write(0x00); // RIC = 0
+        w.write(0x00); // S=0, deltaBase = 0
+        w.write(0x5f); // literal name ref, T=1, low 4 = 15 (max, continuation follows)
+        w.write(0x54); // continuation: 84 (15 + 84 = 99)
+        w.write(0x01); // value length
+        w.write(0x78); // "x"
+        const dec = new QpackDecoder();
+        dec.applyMaxCapacity(1024);
+        expect(() => dec.decode(w.toBytes(), 0)).toThrow(/invalid static index/);
+    });
+});
+
+describe("QpackDecoder — insertCount + acknowledgedInsertCount getters", () => {
+    it("reports insertCount and acknowledgedInsertCount", () => {
+        const dec = new QpackDecoder();
+        dec.applyMaxCapacity(1024);
+        expect(dec.insertCount).toBe(0);
+        expect(dec.acknowledgedInsertCount).toBe(0);
+        // After consuming encoder stream with inserts, insertCount increases.
+        const enc = new QpackEncoder();
+        enc.applyMaxCapacity(1024);
+        const encoded = enc.encode(new Map([["key", "value"]]));
+        dec.consumeEncoderStream(encoded.encoderBytes);
+        expect(dec.insertCount).toBeGreaterThan(0);
+    });
+});
+
+describe("QpackDecoder — consumeDecoderStream instruction types", () => {
+    it("parses Section Acknowledgment instruction", () => {
+        const dec = new QpackDecoder();
+        // 0 0 <Stream ID 7+>: Section Acknowledgment. Stream ID = 5.
+        const w = new ByteWriter();
+        w.write(0x00 | 5); // prefix 0 0, stream id low bits = 5
+        const result = dec.consumeDecoderStream(w.toBytes());
+        expect(result.acknowledgedStreams).toEqual([5n]);
+        expect(result.cancelledStreams).toEqual([]);
+        expect(result.insertCountIncrement).toBe(0);
+    });
+
+    it("parses Stream Cancellation instruction", () => {
+        const dec = new QpackDecoder();
+        // 0 1 <Stream ID 6+>: Stream Cancellation. Stream ID = 10.
+        const w = new ByteWriter();
+        w.write(0x40 | 10); // prefix 0 1, stream id low bits = 10
+        const result = dec.consumeDecoderStream(w.toBytes());
+        expect(result.acknowledgedStreams).toEqual([]);
+        expect(result.cancelledStreams).toEqual([10n]);
+        expect(result.insertCountIncrement).toBe(0);
+    });
+
+    it("parses Insert Count Increment instruction", () => {
+        const dec = new QpackDecoder();
+        // 1 <Increment 6+>: Insert Count Increment. Increment = 42.
+        const w = new ByteWriter();
+        w.write(0x80 | 42); // prefix 1, increment = 42
+        const result = dec.consumeDecoderStream(w.toBytes());
+        expect(result.acknowledgedStreams).toEqual([]);
+        expect(result.cancelledStreams).toEqual([]);
+        expect(result.insertCountIncrement).toBe(42);
+    });
+
+    it("parses a mixed instruction stream", () => {
+        const dec = new QpackDecoder();
+        const w = new ByteWriter();
+        // Section Ack for stream 1
+        w.write(0x00 | 1);
+        // Insert Count Increment of 3
+        w.write(0x80 | 3);
+        // Stream Cancellation for stream 2
+        w.write(0x40 | 2);
+        const result = dec.consumeDecoderStream(w.toBytes());
+        expect(result.acknowledgedStreams).toEqual([1n]);
+        expect(result.cancelledStreams).toEqual([2n]);
+        expect(result.insertCountIncrement).toBe(3);
     });
 });
