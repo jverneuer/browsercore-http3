@@ -13,6 +13,7 @@ import { QpackDecodeError } from "../src/errors.js";
 import {
     ByteReader,
     ByteWriter,
+    huffmanDecode,
     huffmanEncode,
     readPrefixedInt,
     readStringLiteral,
@@ -203,5 +204,19 @@ describe("readTaggedStringLiteral", () => {
         writePrefixedIntWithBase(w, 0x40 | 0x20, encoded.length, 5);
         w.writeBytes(encoded);
         expect(readTaggedStringLiteral(new ByteReader(w.toBytes()), 5)).toBe(value);
+    });
+});
+
+describe("huffmanDecode — no matching code error (encoding.ts:128)", () => {
+    it("throws QpackDecodeError when no Huffman code matches the bit pattern", () => {
+        // 0xff = 0b11111111. No prefix-free Huffman code in the table matches
+        // these bits at any length:
+        //   5-bit codes: 0x00-0x09  -> top 5 bits 0x1f (31) is not in range
+        //   6-bit codes: 0x14-0x18  -> top 6 bits 0x3f (63) is not in range
+        //   7-bit codes: 0x5c-0x73  -> top 7 bits 0x7f (127) is not in range
+        //   8-bit codes: 0xf8-0xfd  -> top 8 bits 0xff (255) is not in range
+        // The decoder exhausts the table with no match and throws at line 128.
+        const reader = new ByteReader(new Uint8Array([0xff]));
+        expect(() => huffmanDecode(reader, 1)).toThrow(QpackDecodeError);
     });
 });

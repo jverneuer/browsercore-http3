@@ -28,7 +28,11 @@ import type { QuicConnection, QuicStream } from "../src/types.js";
  * stream (clientControl) — the stream the client writes GOAWAY / CANCEL_PUSH
  * frames to — alongside the server's control stream (serverControl).
  */
-async function driveHandshake(quic: FakeQuic): Promise<{ clientControl: QuicStream; serverControl: QuicStream }> {
+async function driveHandshake(quic: FakeQuic): Promise<{
+    clientControl: QuicStream;
+    serverControl: QuicStream;
+    serverEncoder: QuicStream;
+}> {
     // Signal the QUIC handshake so connectHttp3 may open streams.
     quic.completeHandshake();
     const clientControl = await quic.server.acceptUnidirectionalStream();
@@ -37,12 +41,14 @@ async function driveHandshake(quic: FakeQuic): Promise<{ clientControl: QuicStre
     await quic.server.acceptUnidirectionalStream(); // client decoder (type 0x3)
     const serverControl = await quic.server.openUnidirectionalStream();
     await serverControl.write(new Uint8Array([0x0]));
-    await quic.server.openUnidirectionalStream(); // server encoder
+    const serverEncoder = await quic.server.openUnidirectionalStream(); // server encoder
+    // Write the encoder stream-type byte (0x2) the client's read loop consumes.
+    await serverEncoder.write(new Uint8Array([0x2]));
     await quic.server.openUnidirectionalStream(); // server decoder
     // Consume the client's SETTINGS so the client side does not block.
     const reader = new FrameReader(async () => clientControl.read());
     await reader.readFrame();
-    return { clientControl, serverControl };
+    return { clientControl, serverControl, serverEncoder };
 }
 
 /** Settle the async read loops for up to `ms` in 20ms slices. */
@@ -310,33 +316,37 @@ describe("connection — defensive undefined-stream branches", () => {
 });
 
 describe("connection — decodeHeaders ric > 0 + pendingAcknowledges branches", () => {
-    it("processes a HEADERS block with RIC > 0 (dynamic-table reference)", async () => {
-        const { QpackEncoder, QpackDecoder } = await import("../src/qpack/qpack.js");
+    it("processes a HEADERS block with RIC > 0 (dynamic-table reference) and emits Section Acknowledgment", async () => {
+        const { QpackEncoder } = await import("../src/qpack/qpack.js");
 
         const quic = new FakeQuic();
         const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
-        const { serverControl } = await driveHandshake(quic);
+        const { serverControl, serverEncoder } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
 
-        // Build a QPACK encoder/decoder pair to produce a block with RIC > 0.
+        // Build a QPACK encoder to produce a block with RIC > 0. The trick:
+        // first encode causes the encoder to insert an entry into its dynamic
+        // table; the encoder-stream bytes (Insert instruction) must reach the
+        // CLIENT's decoder so its dynamic-table state is current. A second
+        // encode then references that entry, yielding a block with RIC > 0.
         const enc = new QpackEncoder();
-        const dec = new QpackDecoder();
         enc.applyMaxCapacity(1024);
-        dec.applyMaxCapacity(1024);
 
-        // First encode inserts dynamic-table entries.
+        // First encode: inserts "x-key: val1" into the dynamic table.
         const first = enc.encode(new Map([["x-key", "val1"]]));
-        // Feed encoder-stream bytes to the client's decoder so it learns the
-        // dynamic-table state.
-        const c = conn as unknown as {
-            encoderStream: { write: (b: Uint8Array) => Promise<unknown> };
-            decoderStream: { write: (b: Uint8Array) => Promise<unknown> };
-        };
-        await c.encoderStream.write(first.encoderBytes);
+        // Feed the encoder-stream bytes to the CLIENT's decoder by writing them
+        // to the SERVER's encoder stream (the stream the client reads).
+        await serverEncoder.write(first.encoderBytes);
 
-        // Second encode references the dynamic entries (RIC > 0).
+        // Let the client's encoder-stream read loop consume the Insert so its
+        // dynamic table now holds the entry the upcoming block references.
+        await settle(200);
+
+        // Second encode: "x-key: val1" is now a known dynamic entry, so the
+        // encoder emits a dynamic-index reference with RIC = 1.
         const second = enc.encode(new Map([["x-key", "val1"]]));
+        expect(second.requiredInsertCount).toBeGreaterThan(0);
 
         // Send a request, then respond with the RIC > 0 block.
         const reqPromise = conn.request({
@@ -354,40 +364,41 @@ describe("connection — decodeHeaders ric > 0 + pendingAcknowledges branches", 
         await reqReader.readFrame(); // DATA (empty)
 
         // Respond with the RIC > 0 block. The client's decodeHeaders will take
-        // the ric > 0 branch -> emitSectionAcknowledgment.
-        const respHeaders = second.block;
-        await srv.write(serializeFrame({ type: Http3FrameType.HEADERS, payload: respHeaders }));
+        // the ric > 0 branch (line 298) -> emitSectionAcknowledgment (line 345).
+        await srv.write(serializeFrame({ type: Http3FrameType.HEADERS, payload: second.block }));
         await srv.write(serializeFrame({ type: Http3FrameType.DATA, payload: new Uint8Array(0) }));
 
-        // Let the client process and emit the Section Acknowledgment.
+        // Let the client process the HEADERS frame and emit the Section
+        // Acknowledgment on its outbound decoder stream.
         await settle(400);
         await conn.close();
     }, 10000);
 
-    it("covers pendingAcknowledges > 0 in encoder-stream read loop", async () => {
+    it("covers pendingAcknowledges > 0 in encoder-stream read loop (line 447)", async () => {
         const { QpackEncoder } = await import("../src/qpack/qpack.js");
 
         const quic = new FakeQuic();
         const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
-        const { serverControl } = await driveHandshake(quic);
+        const { serverControl, serverEncoder } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
 
         // Use the real QPACK encoder to produce encoder-stream bytes with
         // Insert instructions. When the client's decoder consumes these,
         // pendingAcknowledges becomes > 0, triggering the Insert Count
-        // Increment emission branch.
+        // Increment emission branch (line 447).
         const enc = new QpackEncoder();
         enc.applyMaxCapacity(1024);
         const encoded = enc.encode(new Map([["x-insert", "value"]]));
+        expect(encoded.encoderBytes.length).toBeGreaterThan(0);
 
-        // Write encoder-stream bytes to the client's encoder stream.
-        const c = conn as unknown as {
-            encoderStream: { write: (b: Uint8Array) => Promise<unknown> };
-        };
-        await c.encoderStream.write(encoded.encoderBytes);
+        // Write encoder-stream bytes to the SERVER's encoder stream — the
+        // stream the client's encoder-stream read loop consumes.
+        await serverEncoder.write(encoded.encoderBytes);
 
-        // Give the read loop time to consume and acknowledge.
+        // Give the read loop time to consume the Insert instruction; the
+        // decoder's pendingAcknowledges goes > 0 and the loop emits an
+        // Insert Count Increment on the client's outbound decoder stream.
         await settle(400);
         await conn.close();
     }, 10000);
