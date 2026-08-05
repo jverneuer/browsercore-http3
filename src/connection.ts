@@ -359,7 +359,7 @@ export class Http3ConnectionImpl implements Http3Connection {
                     // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
                     const frame = await reader.readFrame();
                     // eslint-disable-next-line no-console
-                    console.error("BIDI", streamId.toString(), frame.type);
+                    
                     this.manager.dispatchRequestFrame(streamId, frame);
                 }
             } catch {
@@ -635,7 +635,7 @@ export class Http3ConnectionImpl implements Http3Connection {
                     // oxlint-disable-next-line no-await-in-loop -- frames must be processed in arrival order
                     const frame = await reader.readFrame();
                     // eslint-disable-next-line no-console
-                    console.error("PUSH", pushId.toString(), frame.type);
+                    
                     this.manager.dispatchPushFrame(pushId, frame);
                 }
             } catch {
