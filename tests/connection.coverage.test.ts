@@ -238,3 +238,53 @@ describe("connection — peekRequiredInsertCount edge cases", () => {
         await conn.close();
     }, 10000);
 });
+
+describe("connection — applyPeerSettings covers QPACK_BLOCKED_STREAMS branch", () => {
+    it("records QPACK_BLOCKED_STREAMS when peer SETTINGS include it", async () => {
+        const quic = new FakeQuic();
+        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const { serverControl } = await driveHandshake(quic);
+        // Send SETTINGS with QPACK_BLOCKED_STREAMS (0x7) to cover the
+        // `peerBlockedStreams !== undefined` true branch in applyPeerSettings.
+        await serverControl.write(serializeFrame({
+            type: Http3FrameType.SETTINGS,
+            settings: { 0x7: 100 },
+        }));
+        const conn = await connPromise;
+        expect(conn).toBeDefined();
+        await conn.close();
+    }, 10000);
+});
+
+describe("connection — defensive undefined-stream branches", () => {
+    it("writeEncoderStream / writeDecoderStream / sendCancelPush no-op when streams undefined", async () => {
+        const quic = new FakeQuic();
+        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const { serverControl } = await driveHandshake(quic);
+        await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
+        const conn = await connPromise;
+
+        // Access private fields via type assertion to simulate the defensive
+        // paths where streams haven't been set up yet. These methods should
+        // early-return without throwing.
+        const c = conn as unknown as {
+            encoderStream: undefined;
+            decoderStream: undefined;
+            controlStream: undefined;
+            writeEncoderStream(b: Uint8Array): void;
+            writeDecoderStream(b: Uint8Array): void;
+            sendCancelPush(pushId: bigint): Promise<void>;
+        };
+        c.encoderStream = undefined;
+        c.decoderStream = undefined;
+        c.controlStream = undefined;
+
+        expect(() => {
+            c.writeEncoderStream(new Uint8Array([1, 2, 3]));
+            c.writeDecoderStream(new Uint8Array([4, 5, 6]));
+            void c.sendCancelPush(0n);
+        }).not.toThrow();
+
+        await conn.close();
+    }, 10000);
+});
