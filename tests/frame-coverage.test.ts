@@ -303,3 +303,22 @@ describe("FrameParseError", () => {
     it("instanceof Http3Error", () => { expect(new FrameParseError(0)).toBeInstanceOf(Http3Error); });
     it("cause", () => { const c = new RangeError("x"); expect(new FrameParseError(1, { cause: c }).cause).toBe(c); });
 });
+
+describe("FrameReader.readVarint — defensive `first[0] ?? 0` fallback (frame.ts:248)", () => {
+    it("exercises the ?? 0 branch when readBytes(1) returns empty", async () => {
+        // readBytes(1) always returns >=1 byte at runtime (ensure() throws otherwise),
+        // so the `?? 0` on line 248 is unreachable through normal use — it exists only
+        // to satisfy noUncheckedIndexedAccess. To force the fallback, monkey-patch
+        // the instance's readBytes to return an empty array for n=1. This makes
+        // first[0] undefined, the `?? 0` fires (firstOctet becomes 0), and the
+        // downstream decodeVarint throws RangeError on the empty input — proving
+        // the branch executed.
+        const reader = new FrameReader(async () => new Uint8Array(0));
+        const orig = (reader as any).readBytes.bind(reader);
+        (reader as any).readBytes = async (n: number) => {
+            if (n === 1) return new Uint8Array(0);
+            return orig(n);
+        };
+        await expect(reader.readFrame()).rejects.toThrow();
+    });
+});

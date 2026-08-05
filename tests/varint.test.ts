@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import { assertNever } from "../src/index.js";
-import { decodeVarint, encodeVarint, readVarintPayload, VARINT_MAX, writeVarint } from "../src/index.js";
+import { decodeVarint, encodeVarint, readVarintPayload, VARINT_MAX, writeVarint, type Bytes } from "../src/index.js";
 
 /** A varint length that the type system forbids (not 1/2/4/8). Used to exercise the assertNever default. */
 const INVALID_VARINT_LENGTH = 3 as 1 as 1 | 2 | 4 | 8;
@@ -159,5 +159,32 @@ describe("readVarintPayload — exhaustiveness default", () => {
         // real exhaustive-match fallback, not dead code.
         const at = (_i: number): number => 0;
         expect(() => readVarintPayload(at, INVALID_VARINT_LENGTH)).toThrow(/Unexpected value/);
+    });
+});
+
+describe("decodeVarint — noUncheckedIndexedAccess defensive fallbacks", () => {
+    it("falls back to 0 when buf[0] is undefined despite length > 0", () => {
+        // A real Uint8Array never returns undefined for an in-bounds index, but
+        // `?? 0` on line 142 guards the `buf[0]` read under
+        // noUncheckedIndexedAccess. A sparse array cast to Bytes simulates the
+        // invariant violation so the defensive branch is exercised.
+        // [, ,] has length 2 and reads as undefined at every index.
+        const buf = [, ,] as unknown as Bytes;
+        const { value, length } = decodeVarint(buf);
+        // first = undefined ?? 0 = 0 → prefix 0 → 1-byte form; at(0) = 0.
+        expect(length).toBe(1);
+        expect(value).toBe(0n);
+    });
+
+    it("falls back to 0 via the at accessor when an in-bounds byte is missing", () => {
+        // Line 153's `?? 0` inside the `at` accessor fires only if `buf[i]` is
+        // undefined for an index the bounds check passed. [0x40, ,] has length
+        // 2, a defined 0x40 first byte (prefix 01 → 2-byte form), but an
+        // undefined second byte — exercising the fallback at i = 1, not i = 0.
+        const buf = [0x40, ,] as unknown as Bytes;
+        const { value, length } = decodeVarint(buf);
+        // 0x40 & 0x3f = 0 → high byte 0; at(1) = undefined ?? 0 = 0 → value 0.
+        expect(length).toBe(2);
+        expect(value).toBe(0n);
     });
 });
