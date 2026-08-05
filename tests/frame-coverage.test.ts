@@ -143,7 +143,7 @@ describe("frame serialization", () => {
         // All legitimate Http3Frame variants are handled; reach the default branch
         // (the `never` exhaustiveness guard) by feeding an unrecognized type.
         const badFrame = { type: 0x99, payload: new Uint8Array() } as any as Http3Frame;
-        expect(() => serializeFrame(badFrame)).toThrow(/unhandled frame type/);
+        expect(() => serializeFrame(badFrame)).toThrow(/Unexpected value/);
     });
 });
 

@@ -43,6 +43,8 @@ import type { RandomSource } from "@browsercore/transport";
 import { nodeRandomSource } from "@browsercore/transport";
 import {
     Http3FrameType,
+    Http3Settings,
+    silentLogger,
     systemClock,
     type Bytes,
     type Clock,
@@ -97,6 +99,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private readonly qpackEnc: QpackEncoder;
     private readonly manager: ReturnType<typeof createStreamManager> & EventEmitter;
     private readonly clock: Clock;
+    private readonly logger: Logger;
 
     /** Our control + QPACK streams (written to). */
     private controlStream: QuicStream | undefined;
@@ -119,7 +122,9 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
         this.clock = options.clock ?? systemClock;
+        this.logger = options.logger ?? silentLogger;
         this.qpackDec = new QpackDecoder();
+        this.qpackEnc = new QpackEncoder();
         // Apply our advertised QPACK max capacity to both codec sides. Our
         // advertised capacity is a safe initial bound for the encoder (the peer
         // can't exceed it per RFC 9204 §2.2.1); the decoder uses the same bound

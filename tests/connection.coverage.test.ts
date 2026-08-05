@@ -28,15 +28,17 @@ import type { QuicConnection, QuicStream } from "../src/types.js";
  * stream (clientControl) — the stream the client writes GOAWAY / CANCEL_PUSH
  * frames to — alongside the server's control stream (serverControl).
  */
-async function driveHandshake(server: QuicConnection): Promise<{ clientControl: QuicStream; serverControl: QuicStream }> {
-    const clientControl = await server.acceptUnidirectionalStream();
+async function driveHandshake(quic: FakeQuic): Promise<{ clientControl: QuicStream; serverControl: QuicStream }> {
+    // Signal the QUIC handshake so connectHttp3 may open streams.
+    quic.completeHandshake();
+    const clientControl = await quic.server.acceptUnidirectionalStream();
     await clientControl.read(); // control type byte (0x0)
-    await server.acceptUnidirectionalStream(); // client encoder (type 0x2)
-    await server.acceptUnidirectionalStream(); // client decoder (type 0x3)
-    const serverControl = await server.openUnidirectionalStream();
+    await quic.server.acceptUnidirectionalStream(); // client encoder (type 0x2)
+    await quic.server.acceptUnidirectionalStream(); // client decoder (type 0x3)
+    const serverControl = await quic.server.openUnidirectionalStream();
     await serverControl.write(new Uint8Array([0x0]));
-    await server.openUnidirectionalStream(); // server encoder
-    await server.openUnidirectionalStream(); // server decoder
+    await quic.server.openUnidirectionalStream(); // server encoder
+    await quic.server.openUnidirectionalStream(); // server decoder
     // Consume the client's SETTINGS so the client side does not block.
     const reader = new FrameReader(async () => clientControl.read());
     await reader.readFrame();
@@ -55,7 +57,7 @@ describe("connection — push() drains an already-queued promise", () => {
     it("returns the queued promise when pushPromise already fired", async () => {
         const quic = new FakeQuic();
         const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
-        const { serverControl } = await driveHandshake(quic.server);
+        const { serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
 
@@ -123,7 +125,7 @@ describe("connection — manager invokes sendGoaway / sendCancelPush handlers on
     it("abortAll routes GOAWAY and CANCEL_PUSH through the connection handlers", async () => {
         const quic = new FakeQuic();
         const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
-        const { clientControl, serverControl } = await driveHandshake(quic.server);
+        const { clientControl, serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
 
@@ -182,7 +184,7 @@ describe("connection — peekRequiredInsertCount edge cases", () => {
     it("returns 0 for an empty header block (no dynamic-table state)", async () => {
         const quic = new FakeQuic();
         const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
-        const { serverControl } = await driveHandshake(quic.server);
+        const { serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
 
@@ -211,7 +213,7 @@ describe("connection — peekRequiredInsertCount edge cases", () => {
     it("parses a multi-byte Required Insert Count prefix (RIC === max)", async () => {
         const quic = new FakeQuic();
         const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
-        const { serverControl } = await driveHandshake(quic.server);
+        const { serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
 

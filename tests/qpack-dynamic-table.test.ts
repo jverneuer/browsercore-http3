@@ -13,22 +13,24 @@ import {
 } from "../src/qpack/qpack.js";
 import { Http3FrameType, Http3Settings, type QuicConnection, type QuicStream } from "../src/types.js";
 
-async function serverFinishHandshakeWithQpack(server: QuicConnection): Promise<{
+async function serverFinishHandshakeWithQpack(quic: FakeQuic): Promise<{
     serverControl: QuicStream;
     serverEncoder: QuicStream;
     serverDecoder: QuicStream;
     clientEncoder: QuicStream;
     clientDecoder: QuicStream;
 }> {
-    const clientControl = await server.acceptUnidirectionalStream();
+    // Signal the QUIC handshake so connectHttp3 may open streams.
+    quic.completeHandshake();
+    const clientControl = await quic.server.acceptUnidirectionalStream();
     await clientControl.read();
-    const clientEncoder = await server.acceptUnidirectionalStream();
-    const clientDecoder = await server.acceptUnidirectionalStream();
-    const serverControl = await server.openUnidirectionalStream();
+    const clientEncoder = await quic.server.acceptUnidirectionalStream();
+    const clientDecoder = await quic.server.acceptUnidirectionalStream();
+    const serverControl = await quic.server.openUnidirectionalStream();
     await serverControl.write(new Uint8Array([0x0]));
-    const serverEncoder = await server.openUnidirectionalStream();
+    const serverEncoder = await quic.server.openUnidirectionalStream();
     await serverEncoder.write(new Uint8Array([0x2]));
-    const serverDecoder = await server.openUnidirectionalStream();
+    const serverDecoder = await quic.server.openUnidirectionalStream();
     await serverDecoder.write(new Uint8Array([0x3]));
     const reader = new FrameReader(async () => clientControl.read());
     await reader.readFrame();
@@ -43,7 +45,7 @@ describe("QPACK dynamic table — encoder wiring into request()", () => {
             settingsAckTimeoutMs: 5000,
             initialSettings: { [Http3Settings.QPACK_MAX_TABLE_CAPACITY]: 1024 },
         });
-        const { serverControl, clientEncoder } = await serverFinishHandshakeWithQpack(quic.server);
+        const { serverControl, clientEncoder } = await serverFinishHandshakeWithQpack(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
         const typeByte = await clientEncoder.read();
@@ -72,7 +74,7 @@ describe("QPACK dynamic table — SETTINGS_QPACK_MAX_TABLE_CAPACITY flow control
     it("applies peer capacity via Set Capacity on encoder stream", async () => {
         const quic = new FakeQuic();
         const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
-        const { serverControl, clientEncoder } = await serverFinishHandshakeWithQpack(quic.server);
+        const { serverControl, clientEncoder } = await serverFinishHandshakeWithQpack(quic);
         await serverControl.write(serializeFrame({
             type: Http3FrameType.SETTINGS,
             settings: { [Http3Settings.QPACK_MAX_TABLE_CAPACITY]: 512 },
@@ -94,7 +96,7 @@ describe("QPACK dynamic table — decoder-stream read loop", () => {
     it("processes Section Ack, Stream Cancellation, Insert Count Increment", async () => {
         const quic = new FakeQuic();
         const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
-        const { serverControl, serverDecoder } = await serverFinishHandshakeWithQpack(quic.server);
+        const { serverControl, serverDecoder } = await serverFinishHandshakeWithQpack(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
         const reqPromise = conn.request({

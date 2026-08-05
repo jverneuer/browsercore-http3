@@ -246,6 +246,46 @@ export interface HeaderField {
 export type HeaderBlock = Bytes;
 
 // ---------------------------------------------------------------------------
+// Logger abstraction (injected — decouples protocol code from `console`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Logging abstraction for HTTP/3 internals. Injected via {@link Http3Options}
+ * so callers control sink + verbosity without the protocol layer depending on
+ * `console` directly — keeps the package testable and embeddable in non-Node
+ * hosts (browsers, workers) where `console` may not be the desired sink.
+ *
+ * All methods are synchronous and MUST NOT throw — logging failures must never
+ * disrupt protocol operation.
+ */
+export interface Logger {
+    /** Verbose diagnostics — disabled by default in production. */
+    debug(message: string, ...meta: readonly unknown[]): void;
+    /** Recoverable anomaly (e.g. peer SETTINGS violation we tolerated). */
+    warn(message: string, ...meta: readonly unknown[]): void;
+    /** Non-recoverable failure (e.g. GOAWAY received, handshake timeout). */
+    error(message: string, ...meta: readonly unknown[]): void;
+}
+
+/** A silent logger — drops every call. This is the default. */
+export const silentLogger: Logger = {
+    debug: () => {},
+    warn: () => {},
+    error: () => {},
+};
+
+/**
+ * A development logger — forwards to the platform `console`. Opt-in; the
+ * default is {@link silentLogger} so production callers must explicitly enable
+ * noise.
+ */
+export const devLogger: Logger = {
+    debug: (message, ...meta) => console.debug(message, ...meta),
+    warn: (message, ...meta) => console.warn(message, ...meta),
+    error: (message, ...meta) => console.error(message, ...meta),
+};
+
+// ---------------------------------------------------------------------------
 // Clock abstraction (injected — decouples protocol code from wall-clock time)
 // ---------------------------------------------------------------------------
 
@@ -334,4 +374,10 @@ export interface Http3Options {
      * deterministic clock in tests to control time without real waits.
      */
     readonly clock?: Clock;
+    /**
+     * Logger for protocol diagnostics. Defaults to {@link silentLogger} — no
+     * output unless the caller opts in. Use {@link devLogger} to forward to
+     * `console`.
+     */
+    readonly logger?: Logger;
 }
