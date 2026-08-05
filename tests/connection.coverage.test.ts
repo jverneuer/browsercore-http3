@@ -308,3 +308,87 @@ describe("connection — defensive undefined-stream branches", () => {
         await conn.close();
     }, 10000);
 });
+
+describe("connection — decodeHeaders ric > 0 + pendingAcknowledges branches", () => {
+    it("processes a HEADERS block with RIC > 0 (dynamic-table reference)", async () => {
+        const { QpackEncoder, QpackDecoder } = await import("../src/qpack/qpack.js");
+
+        const quic = new FakeQuic();
+        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const { serverControl } = await driveHandshake(quic);
+        await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
+        const conn = await connPromise;
+
+        // Build a QPACK encoder/decoder pair to produce a block with RIC > 0.
+        const enc = new QpackEncoder();
+        const dec = new QpackDecoder();
+        enc.applyMaxCapacity(1024);
+        dec.applyMaxCapacity(1024);
+
+        // First encode inserts dynamic-table entries.
+        const first = enc.encode(new Map([["x-key", "val1"]]));
+        // Feed encoder-stream bytes to the client's decoder so it learns the
+        // dynamic-table state.
+        const c = conn as unknown as {
+            encoderStream: { write: (b: Uint8Array) => Promise<unknown> };
+            decoderStream: { write: (b: Uint8Array) => Promise<unknown> };
+        };
+        await c.encoderStream.write(first.encoderBytes);
+
+        // Second encode references the dynamic entries (RIC > 0).
+        const second = enc.encode(new Map([["x-key", "val1"]]));
+
+        // Send a request, then respond with the RIC > 0 block.
+        const reqPromise = conn.request({
+            method: "GET",
+            scheme: "https",
+            authority: "example.com",
+            path: "/dyn",
+            headers: new Map(),
+            body: undefined,
+        });
+        reqPromise.catch(() => {});
+        const srv = await quic.server.acceptBidirectionalStream();
+        const reqReader = new FrameReader(async () => srv.read());
+        await reqReader.readFrame(); // HEADERS
+        await reqReader.readFrame(); // DATA (empty)
+
+        // Respond with the RIC > 0 block. The client's decodeHeaders will take
+        // the ric > 0 branch -> emitSectionAcknowledgment.
+        const respHeaders = second.block;
+        await srv.write(serializeFrame({ type: Http3FrameType.HEADERS, payload: respHeaders }));
+        await srv.write(serializeFrame({ type: Http3FrameType.DATA, payload: new Uint8Array(0) }));
+
+        // Let the client process and emit the Section Acknowledgment.
+        await settle(400);
+        await conn.close();
+    }, 10000);
+
+    it("covers pendingAcknowledges > 0 in encoder-stream read loop", async () => {
+        const { QpackEncoder } = await import("../src/qpack/qpack.js");
+
+        const quic = new FakeQuic();
+        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const { serverControl } = await driveHandshake(quic);
+        await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
+        const conn = await connPromise;
+
+        // Use the real QPACK encoder to produce encoder-stream bytes with
+        // Insert instructions. When the client's decoder consumes these,
+        // pendingAcknowledges becomes > 0, triggering the Insert Count
+        // Increment emission branch.
+        const enc = new QpackEncoder();
+        enc.applyMaxCapacity(1024);
+        const encoded = enc.encode(new Map([["x-insert", "value"]]));
+
+        // Write encoder-stream bytes to the client's encoder stream.
+        const c = conn as unknown as {
+            encoderStream: { write: (b: Uint8Array) => Promise<unknown> };
+        };
+        await c.encoderStream.write(encoded.encoderBytes);
+
+        // Give the read loop time to consume and acknowledge.
+        await settle(400);
+        await conn.close();
+    }, 10000);
+});
