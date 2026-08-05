@@ -278,9 +278,18 @@ export const silentLogger: Logger = {
  * noise.
  */
 export const devLogger: Logger = {
-    debug: (message, ...meta) => console.debug(message, ...meta),
-    warn: (message, ...meta) => console.warn(message, ...meta),
-    error: (message, ...meta) => console.error(message, ...meta),
+    debug: (message, ...meta) => {
+        // eslint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
+        console.debug(message, ...meta);
+    },
+    warn: (message, ...meta) => {
+        // eslint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
+        console.warn(message, ...meta);
+    },
+    error: (message, ...meta) => {
+        // eslint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
+        console.error(message, ...meta);
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -312,7 +321,9 @@ export const systemClock: Clock = {
     now: () => Date.now(),
     setTimeout: (callback, delayMs) => {
         const timer = setTimeout(callback, delayMs);
-        return () => clearTimeout(timer);
+        return () => {
+            clearTimeout(timer);
+        };
     },
 };
 

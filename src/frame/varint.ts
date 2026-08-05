@@ -137,9 +137,9 @@ export function decodeVarint(buf: Bytes): DecodedVarint {
     if (buf.length === 0) {
         throw new RangeError("varint decode: empty buffer");
     }
-    // buf.length > 0 guarantees buf[0] is defined; the non-null assertion
-    // satisfies noUncheckedIndexedAccess without a dead defensive branch.
-    const first = buf[0]!;
+    // buf.length > 0 guarantees buf[0] is defined; fall back to 0 to satisfy
+    // noUncheckedIndexedAccess without a non-null assertion.
+    const first = buf[0] ?? 0;
     const prefix = first >> 6;
     const length: VarintLength = (1 << prefix) as VarintLength; // 1, 2, 4, or 8
     if (buf.length < length) {

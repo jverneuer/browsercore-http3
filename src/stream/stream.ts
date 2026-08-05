@@ -388,9 +388,9 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
     }
 
     function abortAll(error: Error): void {
-        void handlers.sendGoaway(maxStreamId as Http3StreamId);
+        handlers.sendGoaway(maxStreamId as Http3StreamId);
         for (const pushId of pushes.keys()) {
-            void handlers.sendCancelPush(pushId);
+            handlers.sendCancelPush(pushId);
         }
         for (const p of pending.values()) {
             p.reject(error);
