@@ -287,4 +287,24 @@ describe("connection — defensive undefined-stream branches", () => {
 
         await conn.close();
     }, 10000);
+
+    it("writeDecoderStream writes when decoderStream is defined", async () => {
+        const quic = new FakeQuic();
+        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const { serverControl } = await driveHandshake(quic);
+        await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
+        const conn = await connPromise;
+
+        // Access the private writeDecoderStream with a defined stream to cover
+        // the FALSE branch (s !== undefined) where the write actually happens.
+        const c = conn as unknown as {
+            decoderStream: { write: (b: Uint8Array) => Promise<unknown> };
+            writeDecoderStream(b: Uint8Array): void;
+        };
+        expect(c.decoderStream).toBeDefined();
+        // Should not throw — writes to the real decoder stream.
+        expect(() => c.writeDecoderStream(new Uint8Array([0x00]))).not.toThrow();
+
+        await conn.close();
+    }, 10000);
 });
