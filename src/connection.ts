@@ -39,19 +39,21 @@
  */
 
 import type { EventEmitter } from "node:events";
-import type { RandomSource } from "@browsercore/transport";
-import { nodeRandomSource } from "@browsercore/transport";
 import {
     Http3FrameType,
+    Http3Settings,
+    silentLogger,
     systemClock,
     type Bytes,
     type Clock,
+    type ConnectionId,
     type Http3Connection,
     type Http3Frame,
     type Http3Options,
     type Http3Request,
     type Http3Response,
     type Http3SettingsMap,
+    type Http3StreamId,
     type Logger,
     type QuicConnection,
     type QuicStream,
@@ -61,12 +63,10 @@ import { QpackDecoder, QpackEncoder } from "./qpack/qpack.js";
 import { ByteReader, readPrefixedInt } from "./qpack/encoding.js";
 import { createStreamManager } from "./stream/stream.js";
 import {
-    ConnectionClosedError,
     ConnectionClosingError,
     GoawayReceivedError,
     SettingsAckTimeoutError,
 } from "./errors.js";
-import { createId } from "./utils.js";
 
 /** The stream-type identifier written on the control stream (RFC 9114 §6.2). */
 const CONTROL_STREAM_TYPE = 0x0;
@@ -97,6 +97,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private readonly qpackEnc: QpackEncoder;
     private readonly manager: ReturnType<typeof createStreamManager> & EventEmitter;
     private readonly clock: Clock;
+    private readonly logger: Logger;
 
     /** Our control + QPACK streams (written to). */
     private controlStream: QuicStream | undefined;
@@ -119,7 +120,9 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
         this.clock = options.clock ?? systemClock;
+        this.logger = options.logger ?? silentLogger;
         this.qpackDec = new QpackDecoder();
+        this.qpackEnc = new QpackEncoder();
         // Apply our advertised QPACK max capacity to both codec sides. Our
         // advertised capacity is a safe initial bound for the encoder (the peer
         // can't exceed it per RFC 9204 §2.2.1); the decoder uses the same bound
@@ -137,7 +140,7 @@ export class Http3ConnectionImpl implements Http3Connection {
                 void this.sendCancelPush(pushId);
             },
         });
-        this.manager.setHeaderDecoder((block) => this.decodeHeaders(block));
+        this.manager.setHeaderDecoder((block, streamId) => this.decodeHeaders(block, streamId));
         this.manager.on("goaway", (lastStreamId: Http3StreamId) => {
             this.onPeerGoaway(lastStreamId);
         });
@@ -656,7 +659,7 @@ export class Http3ConnectionImpl implements Http3Connection {
  */
 export async function connectHttp3(options: Http3Options): Promise<Http3Connection> {
     const clock = options.clock ?? systemClock;
-    const id = `http3_${clock.now().toString(36)}`;
+    const id = `http3_${clock.now().toString(36)}` as ConnectionId;
     const timeoutMs = options.settingsAckTimeoutMs ?? DEFAULT_SETTINGS_ACK_TIMEOUT_MS;
     // The QUIC handshake must complete before we exchange HTTP/3 SETTINGS —
     // until it resolves the connection is unprotected and frames must not be
@@ -666,22 +669,6 @@ export async function connectHttp3(options: Http3Options): Promise<Http3Connecti
     const conn = new Http3ConnectionImpl(id, options);
     await conn.doHandshake(timeoutMs);
     return conn;
-}
-
-/**
- * Generate a human-readable connection id from random bytes.
- *
- * HTTP/3 stream ids are sequential by QUIC spec (client-initiated
- * bidirectional streams are 0, 2, 4, …), so the randomness goes into the
- * opaque connection identifier used for logging / correlation instead.
- */
-function generateHttp3Id(random: RandomSource): string {
-    const bytes = random.randomBytes(8);
-    let hex = "";
-    for (let i = 0; i < bytes.length; i += 1) {
-        hex += (bytes[i] ?? 0).toString(16).padStart(2, "0");
-    }
-    return `http3_${hex}`;
 }
 
 // Re-export for callers/tests that want the frame reader.
