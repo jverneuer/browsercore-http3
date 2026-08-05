@@ -53,7 +53,7 @@ export type Http3ManagerEventValue =
 
 /** Per-bidirectional-stream response accumulation. */
 interface PendingResponse {
-    readonly streamId: bigint;
+    readonly streamId: Http3StreamId;
     readonly kind: "request" | "push";
     readonly resolve: (res: Http3Response) => void;
     readonly reject: (err: Error) => void;
@@ -388,7 +388,7 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
     }
 
     function abortAll(error: Error): void {
-        void handlers.sendGoaway(maxStreamId);
+        void handlers.sendGoaway(maxStreamId as Http3StreamId);
         for (const pushId of pushes.keys()) {
             void handlers.sendCancelPush(pushId);
         }
@@ -403,9 +403,10 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
     }
 
     function cancelStream(streamId: bigint, error: Error): void {
-        const p = pending.get(streamId);
+        const id = streamId as Http3StreamId;
+        const p = pending.get(id);
         if (p !== undefined) {
-            pending.delete(streamId);
+            pending.delete(id);
             p.reject(error);
         }
     }

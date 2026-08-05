@@ -18,8 +18,6 @@
  *     QUIC handles flow control, reset, and liveness.
  */
 
-import type { RandomSource } from "@browsercore/transport";
-
 // ---------------------------------------------------------------------------
 // Domain primitives
 // ---------------------------------------------------------------------------
@@ -381,3 +379,39 @@ export interface Http3Options {
      */
     readonly logger?: Logger;
 }
+
+// ---------------------------------------------------------------------------
+// Logger abstraction (injected — this package never touches `console`)
+// ---------------------------------------------------------------------------
+
+/**
+ * The logging sink HTTP/3 consumes. Injected so the package never writes to
+ * `console` directly — callers supply a real logger in dev/production and a
+ * no-op ({@link silentLogger}) by default so tests and embedded consumers
+ * stay silent unless they opt in via {@link Http3Options.logger}.
+ *
+ * Method names track the `console` calls they replace: `debug` ← `console.log`,
+ * `warn` ← `console.warn`, `error` ← `console.error`.
+ */
+export interface Logger {
+    /** Informational / trace output (replaces `console.log`). */
+    readonly debug: (...args: unknown[]) => void;
+    /** Recoverable anomaly (replaces `console.warn`). */
+    readonly warn: (...args: unknown[]) => void;
+    /** Hard failure (replaces `console.error`). */
+    readonly error: (...args: unknown[]) => void;
+}
+
+/** No-op logger — the default. Every call is a silent drop. */
+export const silentLogger: Logger = {
+    debug: () => {},
+    warn: () => {},
+    error: () => {},
+};
+
+/** Development logger that delegates to the global `console`. */
+export const devLogger: Logger = {
+    debug: (...args) => console.debug(...args),
+    warn: (...args) => console.warn(...args),
+    error: (...args) => console.error(...args),
+};
