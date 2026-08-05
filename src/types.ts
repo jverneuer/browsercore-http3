@@ -279,15 +279,15 @@ export const silentLogger: Logger = {
  */
 export const devLogger: Logger = {
     debug: (message, ...meta) => {
-        // eslint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
+        // oxlint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
         console.debug(message, ...meta);
     },
     warn: (message, ...meta) => {
-        // eslint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
+        // oxlint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
         console.warn(message, ...meta);
     },
     error: (message, ...meta) => {
-        // eslint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
+        // oxlint-disable-next-line no-console -- devLogger IS the sanctioned console fallback
         console.error(message, ...meta);
     },
 };
