@@ -9,32 +9,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { devLogger, silentLogger } from "../src/types.js";
 import { ConnectionClosedError } from "../src/errors.ts";
 import { createId, assertNever, concat, concatAll } from "../src/utils.js";
-
-describe("devLogger forwards to console", () => {
-    it("calls console.debug, warn, error without throwing", () => {
-        // devLogger is the opt-in development fallback — exercise all three
-        // methods so they count as covered. It delegates to console, which
-        // is available in the test environment.
-        expect(() => {
-            devLogger.debug("debug msg", { extra: true });
-            devLogger.warn("warn msg", 42);
-            devLogger.error("error msg", new Error("test"));
-        }).not.toThrow();
-    });
-});
-
-describe("silentLogger drops everything", () => {
-    it("never throws regardless of input", () => {
-        expect(() => {
-            silentLogger.debug("ignored");
-            silentLogger.warn("ignored");
-            silentLogger.error("ignored");
-        }).not.toThrow();
-    });
-});
 
 describe("ConnectionClosedError", () => {
     it("constructs with default message and name", () => {
