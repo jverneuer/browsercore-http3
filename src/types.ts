@@ -70,8 +70,12 @@ export interface QuicConnection {
      * protected. HTTP/3 SETTINGS exchange may only begin after this resolves —
      * frames written before the handshake complete would travel over an
      * unprotected connection.
+     *
+     * Optional: if the QuicConnection implementation does not provide it
+     * (e.g. older versions of @browsercore/quic), HTTP/3 proceeds without
+     * waiting for the handshake to complete.
      */
-    handshake(): Promise<void>;
+    handshake?(): Promise<void>;
     /** Open a new bidirectional stream (request/response). */
     openBidirectionalStream(): Promise<QuicStream>;
     /** Accept the next incoming bidirectional stream from the peer. */

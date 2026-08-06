@@ -665,7 +665,11 @@ export async function connectHttp3(options: Http3Options): Promise<Http3Connecti
     // until it resolves the connection is unprotected and frames must not be
     // written. Awaiting it here guarantees the SETTINGS exchange (and all
     // request/response traffic) travels over the protected QUIC connection.
-    await options.quic.handshake();
+    // If the QuicConnection implementation does not provide a handshake method
+    // (e.g. older versions of @browsercore/quic), skip this step.
+    if (options.quic.handshake) {
+        await options.quic.handshake();
+    }
     const conn = new Http3ConnectionImpl(id, options);
     await conn.doHandshake(timeoutMs);
     return conn;
