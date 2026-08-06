@@ -38,7 +38,6 @@
  * `@browsercore/quic` package. Tests drive this with a fake QUIC connection.
  */
 
-import type { EventEmitter } from "node:events";
 import {
     Http3FrameType,
     Http3Settings,
@@ -47,6 +46,7 @@ import {
     type Bytes,
     type Clock,
     type ConnectionId,
+    type EventEmitterLike,
     type Http3Connection,
     type Http3Frame,
     type Http3Options,
@@ -95,7 +95,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private readonly quic: QuicConnection;
     private readonly qpackDec: QpackDecoder;
     private readonly qpackEnc: QpackEncoder;
-    private readonly manager: ReturnType<typeof createStreamManager> & EventEmitter;
+    private readonly manager: ReturnType<typeof createStreamManager> & EventEmitterLike;
     private readonly clock: Clock;
     private readonly logger: Logger;
 

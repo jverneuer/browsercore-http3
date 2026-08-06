@@ -21,11 +21,11 @@
  * here.
  */
 
-import type { EventEmitter } from "node:events";
 import {
     Http3FrameType,
     HTTP3_UNKNOWN_FRAME_TYPE,
     type Bytes,
+    type EventEmitterLike,
     type Http3Frame,
     type Http3Response,
     type Http3StreamId,
@@ -212,7 +212,7 @@ const defaultHeaderDecoder: HeaderDecoder = (block, streamId) => {
 };
 
 /** Create a stream manager bound to the connection's frame I/O. */
-export function createStreamManager(handlers: StreamManagerHandlers): StreamManager & EventEmitter {
+export function createStreamManager(handlers: StreamManagerHandlers): StreamManager & EventEmitterLike {
     const emitter = new StreamEventBridge();
 
     let maxStreamId = 0n;
@@ -438,7 +438,7 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
             emitter.removeAllListeners(event);
         },
         emit: (event: string | symbol, ...args: unknown[]) => emitter.emit(event, ...args),
-    } as StreamManager & EventEmitter;
+    } as StreamManager & EventEmitterLike;
 
     return manager;
 }
