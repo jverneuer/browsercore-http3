@@ -27,13 +27,16 @@ import {
     type Bytes,
     type Http3Frame,
     type Http3FrameTypeValue,
-    type Http3SettingsKey,
     type Http3SettingsMap,
     type Http3UnknownFrame,
 } from "../types.js";
 import { assertNever, concat, concatAll } from "../utils.js";
 import { decodeVarint, encodeVarint } from "./varint.js";
 import { FrameParseError } from "../errors.js";
+import {
+    Http3FrameSchema,
+    Http3SettingsMapSchema,
+} from "../schemas.js";
 
 export {
     Http3FrameType,
@@ -134,66 +137,64 @@ export function serializeFrame(frame: Http3Frame): Bytes {
 // Parsing
 // ---------------------------------------------------------------------------
 
-/** The SETTINGS identifiers HTTP/3 defines (RFC 9114 §7.2.4). */
-const Http3SettingsId = {
-    QPACK_MAX_TABLE_CAPACITY: 0x1,
-    MAX_FIELD_SECTION_SIZE: 0x6,
-    QPACK_BLOCKED_STREAMS: 0x7,
-} as const;
-
-/** The SETTINGS ids we understand — unknown ids are ignored per RFC 9114 §7.2.4. */
-const KNOWN_SETTINGS_IDS: ReadonlySet<bigint> = new Set([
-    BigInt(Http3SettingsId.QPACK_MAX_TABLE_CAPACITY),
-    BigInt(Http3SettingsId.MAX_FIELD_SECTION_SIZE),
-    BigInt(Http3SettingsId.QPACK_BLOCKED_STREAMS),
-]);
-
 /** Parse a SETTINGS payload (repeated id/value varints) into a settings map. */
 function parseSettings(payload: Bytes): Http3SettingsMap {
-    const settings: Http3SettingsMap = {};
+    // Decode the wire into untrusted (id, value) pairs. The Zod parse below
+    // validates each id against the known SETTINGS set (RFC 9114 §7.2.4) and
+    // drops unknown ids, narrowing the retained keys to Http3SettingsKey with
+    // no `as` cast — the validated map is returned directly.
+    const raw: { id: number; value: number }[] = [];
     let offset = 0;
     while (offset < payload.length) {
         const id = decodeVarint(payload.subarray(offset));
         const value = decodeVarint(payload.subarray(offset + id.length));
         offset += id.length + value.length;
-        // Only retain known settings identifiers; unknown ones are ignored per
-        // RFC 9114 §7.2.4. The set membership check narrows `id.value` to a
-        // valid Http3SettingsKey so it can index the map.
-        if (KNOWN_SETTINGS_IDS.has(id.value)) {
-            const key = id.value as unknown as Http3SettingsKey;
-            settings[key] = Number(value.value);
-        }
+        raw.push({ id: Number(id.value), value: Number(value.value) });
     }
-    return settings;
+    return Http3SettingsMapSchema.parse(raw);
 }
 
 /** Parse a complete payload into the matching `Http3Frame` variant. */
 function parseFramePayload(rawType: number, payload: Bytes): Http3Frame {
+    // Decode the wire into an untrusted intermediate shape per variant. The
+    // Zod parse below validates it against Http3FrameSchema before it crosses
+    // into the typed state machine — no frame escapes as a typed Http3Frame
+    // without validation (Rule 12: validate external data immediately).
+    let raw: Record<string, unknown>;
     switch (rawType) {
         case Http3FrameType.DATA:
-            return { type: Http3FrameType.DATA, payload };
+            raw = { type: Http3FrameType.DATA, payload };
+            break;
         case Http3FrameType.HEADERS:
-            return { type: Http3FrameType.HEADERS, payload };
+            raw = { type: Http3FrameType.HEADERS, payload };
+            break;
         case Http3FrameType.CANCEL_PUSH:
-            return { type: Http3FrameType.CANCEL_PUSH, pushId: decodeVarint(payload).value };
+            raw = { type: Http3FrameType.CANCEL_PUSH, pushId: decodeVarint(payload).value };
+            break;
         case Http3FrameType.SETTINGS:
-            return { type: Http3FrameType.SETTINGS, settings: parseSettings(payload) };
+            raw = { type: Http3FrameType.SETTINGS, settings: parseSettings(payload) };
+            break;
         case Http3FrameType.PUSH_PROMISE: {
             const id = decodeVarint(payload);
-            return {
+            raw = {
                 type: Http3FrameType.PUSH_PROMISE,
                 pushId: id.value,
                 payload: payload.subarray(id.length),
             };
+            break;
         }
         case Http3FrameType.GOAWAY:
-            return { type: Http3FrameType.GOAWAY, streamId: decodeVarint(payload).value };
+            raw = { type: Http3FrameType.GOAWAY, streamId: decodeVarint(payload).value };
+            break;
         case Http3FrameType.MAX_PUSH_ID:
-            return { type: Http3FrameType.MAX_PUSH_ID, pushId: decodeVarint(payload).value };
+            raw = { type: Http3FrameType.MAX_PUSH_ID, pushId: decodeVarint(payload).value };
+            break;
         default:
             // GREASE / reserved type — retain raw type + payload, ignore it.
-            return { type: HTTP3_UNKNOWN_FRAME_TYPE, rawType, payload };
+            raw = { type: HTTP3_UNKNOWN_FRAME_TYPE, rawType, payload };
+            break;
     }
+    return Http3FrameSchema.parse(raw);
 }
 
 // ---------------------------------------------------------------------------
