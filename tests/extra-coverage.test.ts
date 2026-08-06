@@ -1,6 +1,5 @@
 /**
  * Focused coverage for the remaining gaps the lifecycle + coverage tests miss:
- *   - devLogger methods (types.ts function coverage)
  *   - ConnectionClosedError constructor (errors.ts function coverage)
  *   - createId helper (utils.ts function coverage)
  *   - writeEncoderStream / writeDecoderStream undefined-stream early returns
