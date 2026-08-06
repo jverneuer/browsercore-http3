@@ -16,6 +16,7 @@ import type { Bytes, HeaderField, HeaderBlock } from "../types.js";
 import { QpackDecodeError } from "../errors.js";
 import { STATIC_TABLE } from "./tables.js";
 import { QpackDynamicTable } from "./dynamic-table.js";
+import { HeaderFieldSchema } from "../schemas.js";
 import {
     ByteReader,
     ByteWriter,
@@ -94,12 +95,14 @@ export function encodeHeaders(headers: ReadonlyMap<string, string>): Bytes {
 function readRepresentation(reader: ByteReader): HeaderField {
     const first = reader.peek();
     if ((first & 0x80) !== 0) {
-        return decodeStaticIndexed(reader);
+        // Validate the decoded field line against the schema before it crosses
+        // into the typed domain (Rule 12: validate external data immediately).
+        return HeaderFieldSchema.parse(decodeStaticIndexed(reader));
     }
     if ((first & 0x40) !== 0) {
-        return decodeStaticLiteralNameRef(reader);
+        return HeaderFieldSchema.parse(decodeStaticLiteralNameRef(reader));
     }
-    return decodeLiteralLiteral(reader);
+    return HeaderFieldSchema.parse(decodeLiteralLiteral(reader));
 }
 
 /** Decode an Indexed Field Line referencing the static table. */
@@ -297,18 +300,21 @@ export class QpackDecoder {
     private readBlockRepresentation(reader: ByteReader, base: number): HeaderField {
         const first = reader.peek();
         if ((first & 0x80) !== 0) {
-            return this.decodeIndexed(reader, base);
+            // Validate the decoded field line against the schema before it
+            // crosses into the typed domain (Rule 12: validate external data
+            // immediately).
+            return HeaderFieldSchema.parse(this.decodeIndexed(reader, base));
         }
         if ((first & 0xc0) === 0x40) {
-            return this.decodeLiteralNameRef(reader, base);
+            return HeaderFieldSchema.parse(this.decodeLiteralNameRef(reader, base));
         }
         if ((first & 0xf0) === 0x10) {
-            return this.decodePostBaseIndexed(reader, base);
+            return HeaderFieldSchema.parse(this.decodePostBaseIndexed(reader, base));
         }
         if ((first & 0xf0) === 0x00) {
-            return this.decodePostBaseLiteralNameRef(reader, base);
+            return HeaderFieldSchema.parse(this.decodePostBaseLiteralNameRef(reader, base));
         }
-        return decodeLiteralLiteral(reader);
+        return HeaderFieldSchema.parse(decodeLiteralLiteral(reader));
     }
 
     private decodeIndexed(reader: ByteReader, base: number): HeaderField {

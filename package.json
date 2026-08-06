@@ -41,7 +41,8 @@
     },
     "dependencies": {
         "@browsercore/quic": "0.2.1",
-        "@browsercore/transport": "^0.2.3"
+        "@browsercore/transport": "^0.2.3",
+        "zod": "^4.4.3"
     },
     "devDependencies": {
         "@browsercore/dev": "latest",
