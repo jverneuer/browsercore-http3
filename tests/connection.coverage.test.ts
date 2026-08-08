@@ -22,6 +22,7 @@ import { FrameReader, serializeFrame } from "../src/frame/frame.js";
 import { encodeHeaders } from "../src/qpack/qpack.js";
 import { Http3FrameType } from "../src/types.js";
 import type { QuicConnection, QuicStream } from "../src/types.js";
+import { createMockEventProvider } from "./test-helpers.js";
 
 /**
  * Drive the handshake manually so we retain the client's outbound control
@@ -62,7 +63,7 @@ async function settle(ms: number): Promise<void> {
 describe("connection — push() drains an already-queued promise", () => {
     it("returns the queued promise when pushPromise already fired", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
@@ -130,7 +131,7 @@ describe("connection — push() drains an already-queued promise", () => {
 describe("connection — manager invokes sendGoaway / sendCancelPush handlers on abortAll", () => {
     it("abortAll routes GOAWAY and CANCEL_PUSH through the connection handlers", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { clientControl, serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
@@ -189,7 +190,7 @@ describe("connection — manager invokes sendGoaway / sendCancelPush handlers on
 describe("connection — peekRequiredInsertCount edge cases", () => {
     it("returns 0 for an empty header block (no dynamic-table state)", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
@@ -218,7 +219,7 @@ describe("connection — peekRequiredInsertCount edge cases", () => {
 
     it("parses a multi-byte Required Insert Count prefix (RIC === max)", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
@@ -248,7 +249,7 @@ describe("connection — peekRequiredInsertCount edge cases", () => {
 describe("connection — applyPeerSettings covers QPACK_BLOCKED_STREAMS branch", () => {
     it("records QPACK_BLOCKED_STREAMS when peer SETTINGS include it", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl } = await driveHandshake(quic);
         // Send SETTINGS with QPACK_BLOCKED_STREAMS (0x7) to cover the
         // `peerBlockedStreams !== undefined` true branch in applyPeerSettings.
@@ -265,7 +266,7 @@ describe("connection — applyPeerSettings covers QPACK_BLOCKED_STREAMS branch",
 describe("connection — defensive undefined-stream branches", () => {
     it("writeEncoderStream / writeDecoderStream / sendCancelPush no-op when streams undefined", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
@@ -296,7 +297,7 @@ describe("connection — defensive undefined-stream branches", () => {
 
     it("writeDecoderStream writes when decoderStream is defined", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
@@ -320,7 +321,7 @@ describe("connection — decodeHeaders ric > 0 + pendingAcknowledges branches", 
         const { QpackEncoder } = await import("../src/qpack/qpack.js");
 
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl, serverEncoder } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
@@ -378,7 +379,7 @@ describe("connection — decodeHeaders ric > 0 + pendingAcknowledges branches", 
         const { QpackEncoder } = await import("../src/qpack/qpack.js");
 
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl, serverEncoder } = await driveHandshake(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;

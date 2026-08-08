@@ -21,11 +21,11 @@
  * here.
  */
 
+import type { EventProvider } from "@browsercore/contracts";
 import {
     Http3FrameType,
     HTTP3_UNKNOWN_FRAME_TYPE,
     type Bytes,
-    type EventEmitterLike,
     type Http3Frame,
     type Http3Response,
     type Http3StreamId,
@@ -119,6 +119,20 @@ export interface StreamManager {
 
     /** Set the QPACK header-block decoder used for response HEADERS frames. */
     setHeaderDecoder(decoder: HeaderDecoder): void;
+
+    // --- EventProvider surface (delegated to the injected backend) ----------
+    // The generic type params are load-bearing: they let callers pass listeners
+    // whose arguments are typed (e.g. `(lastStreamId: Http3StreamId) => void`)
+    // without relying on the hidden `any`. The injected EventProvider is
+    // structural, so delegation casts to its `unknown`-args signature.
+    /* oxlint-disable typescript/no-unnecessary-type-parameters */
+    on<TArgs extends unknown[]>(event: string, listener: (...args: TArgs) => void): void;
+    once<TArgs extends unknown[]>(event: string, listener: (...args: TArgs) => void): void;
+    off<TArgs extends unknown[]>(event: string, listener: (...args: TArgs) => void): void;
+    /* oxlint-enable typescript/no-unnecessary-type-parameters */
+    removeListener(event: string, listener: (...args: unknown[]) => void): void;
+    removeAllListeners(event?: string): void;
+    emit(event: string, ...args: unknown[]): boolean;
 }
 
 /**
@@ -128,66 +142,6 @@ export interface StreamManager {
  * {@link QpackDecoder} here; the manager stays decoupled from QPACK internals.
  */
 export type HeaderDecoder = (block: Bytes, streamId: bigint) => ReadonlyMap<string, string>;
-
-/**
- * Minimal EventEmitter-shaped facade over the platform {@link EventTarget}.
- *
- * `unicorn/prefer-event-target` forbids `new EventEmitter()`, so the manager
- * backs its public `EventEmitter` contract (`on`/`once`/`off`/`emit`) with an
- * `EventTarget`, translating via `CustomEvent.detail`.
- */
-class StreamEventBridge extends EventTarget {
-    private readonly wrappers = new Map<(...args: unknown[]) => void, { wrapper: EventListener; event: string }>();
-
-    public on(event: string | symbol, listener: (...args: unknown[]) => void): void {
-        const wrapper = ((e: Event) => {
-            listener(...(e as CustomEvent<unknown[]>).detail);
-        }) as EventListener;
-        const key = event as string;
-        this.wrappers.set(listener, { wrapper, event: key });
-        this.addEventListener(key, wrapper);
-    }
-
-    public once(event: string | symbol, listener: (...args: unknown[]) => void): void {
-        const wrapper = ((e: Event) => {
-            this.wrappers.delete(listener);
-            listener(...(e as CustomEvent<unknown[]>).detail);
-        }) as EventListener;
-        const key = event as string;
-        this.wrappers.set(listener, { wrapper, event: key });
-        this.addEventListener(key, wrapper, { once: true });
-    }
-
-    public off(event: string | symbol, listener: (...args: unknown[]) => void): void {
-        const entry = this.wrappers.get(listener);
-        if (entry !== undefined) {
-            this.wrappers.delete(listener);
-            this.removeEventListener(event as string, entry.wrapper);
-        }
-    }
-
-    public removeListener(event: string | symbol, listener: (...args: unknown[]) => void): void {
-        this.off(event, listener);
-    }
-
-    public removeAllListeners(event?: string | symbol): void {
-        const target = event as string | undefined;
-        const toRemove: Array<(...args: unknown[]) => void> = [];
-        for (const [listener, entry] of this.wrappers) {
-            if (target === undefined || entry.event === target) {
-                this.removeEventListener(entry.event, entry.wrapper);
-                toRemove.push(listener);
-            }
-        }
-        for (const listener of toRemove) {
-            this.wrappers.delete(listener);
-        }
-    }
-
-    public emit(event: string | symbol, ...args: unknown[]): boolean {
-        return this.dispatchEvent(new CustomEvent<unknown[]>(event as string, { detail: args }));
-    }
-}
 
 /** Concatenate many byte arrays into one. */
 function concatBytes(parts: readonly Bytes[]): Bytes {
@@ -211,10 +165,15 @@ const defaultHeaderDecoder: HeaderDecoder = (block, streamId) => {
     throw new Error("stream manager: no header decoder set");
 };
 
-/** Create a stream manager bound to the connection's frame I/O. */
-export function createStreamManager(handlers: StreamManagerHandlers): StreamManager & EventEmitterLike {
-    const emitter = new StreamEventBridge();
-
+/**
+ * Create a stream manager bound to the connection's frame I/O.
+ *
+ * The manager delegates its public event contract ({@link EventProvider}) to
+ * the injected `events` backend rather than constructing one — the backend is
+ * swappable (Node EventEmitter, EventTarget, mock) and is supplied by the
+ * composition root (browsersmith). This package provides no fallback.
+ */
+export function createStreamManager(handlers: StreamManagerHandlers, events: EventProvider): StreamManager {
     let maxStreamId = 0n;
 
     // streamId → pending response resolver (client-initiated bidirectional streams).
@@ -252,7 +211,7 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
         if (frame.type === Http3FrameType.PUSH_PROMISE) {
             // `frame.pushId` is a wire `bigint`; cast to the branded
             // `Http3StreamId` the connection's event listener expects.
-            emitter.emit(Http3ManagerEvent.PushPromise, frame.pushId as Http3StreamId, frame.payload);
+            events.emit(Http3ManagerEvent.PushPromise, frame.pushId as Http3StreamId, frame.payload);
             return;
         }
         const p = pending.get(streamId);
@@ -311,13 +270,13 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
     function dispatchControlFrame(frame: Http3Frame): void {
         switch (frame.type) {
             case Http3FrameType.SETTINGS:
-                emitter.emit(Http3ManagerEvent.Settings);
+                events.emit(Http3ManagerEvent.Settings);
                 break;
             case Http3FrameType.GOAWAY:
-                emitter.emit(Http3ManagerEvent.Goaway, frame.streamId);
+                events.emit(Http3ManagerEvent.Goaway, frame.streamId);
                 break;
             case Http3FrameType.MAX_PUSH_ID:
-                emitter.emit(Http3ManagerEvent.MaxPushId, frame.pushId);
+                events.emit(Http3ManagerEvent.MaxPushId, frame.pushId);
                 break;
             case Http3FrameType.CANCEL_PUSH:
                 // The peer is cancelling a pushed resource — reject the pending
@@ -411,7 +370,7 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
         }
     }
 
-    const manager = {
+    const manager: StreamManager = {
         expectResponse,
         expectPush,
         dispatchRequestFrame,
@@ -422,23 +381,32 @@ export function createStreamManager(handlers: StreamManagerHandlers): StreamMana
         setHeaderDecoder(decoder: HeaderDecoder): void {
             headerDecoder = decoder;
         },
-        on: (event: string | symbol, listener: (...args: unknown[]) => void) => {
-            emitter.on(event, listener);
+        // EventProvider delegation — forwards the manager's public event contract
+        // to the injected backend so the backend stays swappable. The injected
+        // provider is structural (unknown args), so typed listeners are cast.
+        // The generic params are load-bearing (see the interface note above):
+        // they let callers pass typed listeners. oxlint flags them as unused.
+        /* oxlint-disable typescript/no-unnecessary-type-parameters */
+        on<TArgs extends unknown[]>(event: string, listener: (...args: TArgs) => void): void {
+            events.on(event, listener as (...args: unknown[]) => void);
         },
-        once: (event: string | symbol, listener: (...args: unknown[]) => void) => {
-            emitter.once(event, listener);
+        once<TArgs extends unknown[]>(event: string, listener: (...args: TArgs) => void): void {
+            events.once(event, listener as (...args: unknown[]) => void);
         },
-        off: (event: string | symbol, listener: (...args: unknown[]) => void) => {
-            emitter.off(event, listener);
+        off<TArgs extends unknown[]>(event: string, listener: (...args: TArgs) => void): void {
+            events.off(event, listener as (...args: unknown[]) => void);
         },
-        removeListener: (event: string | symbol, listener: (...args: unknown[]) => void) => {
-            emitter.removeListener(event, listener);
+        /* oxlint-enable typescript/no-unnecessary-type-parameters */
+        removeListener(event: string, listener: (...args: unknown[]) => void): void {
+            events.removeListener(event, listener);
         },
-        removeAllListeners: (event?: string | symbol) => {
-            emitter.removeAllListeners(event);
+        removeAllListeners(event?: string): void {
+            events.removeAllListeners(event);
         },
-        emit: (event: string | symbol, ...args: unknown[]) => emitter.emit(event, ...args),
-    } as StreamManager & EventEmitterLike;
+        emit(event: string, ...args: unknown[]): boolean {
+            return events.emit(event, ...args);
+        },
+    };
 
     return manager;
 }

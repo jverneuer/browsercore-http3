@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { connectHttp3 } from "../src/connection.js";
 import { FakeQuic, driveFakeServer } from "./fake-quic.js";
+import { createMockEventProvider } from "./test-helpers.js";
 
 describe("HTTP/3 end-to-end over fake QUIC (Step 11)", () => {
     it("completes the SETTINGS handshake and serves a request", async () => {
@@ -17,7 +18,7 @@ describe("HTTP/3 end-to-end over fake QUIC (Step 11)", () => {
         // the HTTP/3 SETTINGS exchange over the protected connection.
         quic.completeHandshake();
 
-        const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const conn = await connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
 
         const res = await conn.request({
             method: "GET",
@@ -39,7 +40,7 @@ describe("HTTP/3 end-to-end over fake QUIC (Step 11)", () => {
         const quic = new FakeQuic();
         const serverDone = driveFakeServer(quic.server);
         quic.completeHandshake();
-        const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const conn = await connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
 
         const paths = ["/a", "/b", "/c"];
         const responses = await Promise.all(
@@ -68,7 +69,7 @@ describe("HTTP/3 end-to-end over fake QUIC (Step 11)", () => {
         const quic = new FakeQuic();
         const serverDone = driveFakeServer(quic.server);
         quic.completeHandshake();
-        const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const conn = await connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
 
         await conn.request({
             method: "GET",

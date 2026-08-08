@@ -27,6 +27,9 @@
 import { describe, it, expect } from "vitest";
 import { createStreamManager, PushCancelledError } from "../src/stream/stream.js";
 import { Http3FrameType, HTTP3_UNKNOWN_FRAME_TYPE, type Http3Frame } from "../src/types.js";
+import { createMockEventProvider } from "./test-helpers.js";
+
+const newManager = () => createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} }, createMockEventProvider());
 
 const HEADERS = (payload: number[]): Http3Frame => ({
     type: Http3FrameType.HEADERS,
@@ -44,7 +47,7 @@ const GREASE = (payload: number[]): Http3Frame => ({
 
 describe("stream manager — finalize (status + body)", () => {
     it("parses a non-200 status from :status", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "404"]]));
         const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
         mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
@@ -53,7 +56,7 @@ describe("stream manager — finalize (status + body)", () => {
     });
 
     it("delivers the request body from the DATA frame", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
         mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
@@ -66,7 +69,7 @@ describe("stream manager — finalize (status + body)", () => {
     });
 
     it("falls back to status 200 when :status is not finite", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "not-a-number"]]));
         const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
         mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
@@ -75,7 +78,7 @@ describe("stream manager — finalize (status + body)", () => {
     });
 
     it("falls back to status 200 when :status is absent", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         // A decoder that returns headers WITHOUT a :status key exercises the
         // `status === undefined` false branch in finalize (line 210).
         mgr.setHeaderDecoder(() => new Map([["content-type", "text/plain"]]));
@@ -88,21 +91,21 @@ describe("stream manager — finalize (status + body)", () => {
 
 describe("stream manager — dispatch edge cases", () => {
     it("ignores frames for an unknown stream id", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         // No expectResponse registered — must be a silent no-op.
         mgr.dispatchRequestFrame(4n, HEADERS([0x80]));
         mgr.dispatchRequestFrame(4n, DATA([0x61]));
     });
 
     it("ignores push frames for an unknown push id", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         // No expectPush registered — must be a silent no-op.
         mgr.dispatchPushFrame(4n, HEADERS([0x80]));
         mgr.dispatchPushFrame(4n, DATA([0x61]));
     });
 
     it("rejects the response when the header decoder throws (default decoder)", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         // Do NOT set a header decoder: the default decoder throws
         // "no header decoder set", and finalize rejects the response.
         const result = new Promise<void>((resolve, reject) => {
@@ -114,7 +117,7 @@ describe("stream manager — dispatch edge cases", () => {
     });
 
     it("rejects the response when header decoding fails", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         // A decoder that throws forces finalize down the reject path.
         mgr.setHeaderDecoder(() => {
             throw new Error("boom");
@@ -128,7 +131,7 @@ describe("stream manager — dispatch edge cases", () => {
     });
 
     it("correlates a push response by push id", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const result = new Promise((resolve, reject) => mgr.expectPush(2n, resolve, reject));
         mgr.dispatchPushFrame(2n, HEADERS([0x80]));
@@ -139,7 +142,7 @@ describe("stream manager — dispatch edge cases", () => {
     });
 
     it("ignores GREASE / unknown frames on a request stream", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
         mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
@@ -153,7 +156,7 @@ describe("stream manager — dispatch edge cases", () => {
 
 describe("stream manager — control frame dispatch", () => {
     it("emits maxPushId on a MAX_PUSH_ID frame", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let got: bigint | undefined;
         mgr.on("maxPushId", (id: bigint) => {
             got = id;
@@ -164,7 +167,7 @@ describe("stream manager — control frame dispatch", () => {
     });
 
     it("emits settings on a SETTINGS frame", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let count = 0;
         mgr.on("settings", () => {
             count += 1;
@@ -174,7 +177,7 @@ describe("stream manager — control frame dispatch", () => {
     });
 
     it("emits goaway with the stream id on a GOAWAY frame", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let got: bigint | undefined;
         mgr.on("goaway", (id: bigint) => {
             got = id;
@@ -186,7 +189,7 @@ describe("stream manager — control frame dispatch", () => {
 
 describe("stream manager — abortAll", () => {
     it("rejects all registered responses", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const p = new Promise<void>((resolve, reject) => {
             mgr.expectResponse(0n, () => reject(new Error("should not resolve")), () => resolve());
@@ -198,7 +201,7 @@ describe("stream manager — abortAll", () => {
 
 describe("StreamEventBridge — subscription lifecycle", () => {
     it("once() fires exactly once", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let count = 0;
         mgr.once("settings", () => {
             count += 1;
@@ -209,7 +212,7 @@ describe("StreamEventBridge — subscription lifecycle", () => {
     });
 
     it("off() unsubscribes a listener", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let count = 0;
         const listener = () => {
             count += 1;
@@ -222,7 +225,7 @@ describe("StreamEventBridge — subscription lifecycle", () => {
     });
 
     it("removeAllListeners() clears handlers", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let count = 0;
         mgr.on("settings", () => {
             count += 1;
@@ -233,7 +236,7 @@ describe("StreamEventBridge — subscription lifecycle", () => {
     });
 
     it("emit() dispatches detail to listeners", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let got: bigint | undefined;
         mgr.on("goaway", (id: bigint) => {
             got = id;
@@ -245,7 +248,7 @@ describe("StreamEventBridge — subscription lifecycle", () => {
     });
 
     it("off() silently ignores a listener that was never registered", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         // Calling off() with a listener that was never added must be a safe
         // no-op — exercises the `entry === undefined` false branch in
         // StreamEventBridge.off() (line 135-137).
@@ -254,7 +257,7 @@ describe("StreamEventBridge — subscription lifecycle", () => {
     });
 
     it("removeAllListeners(event) only clears listeners for that event", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let settingsCount = 0;
         let goawayCount = 0;
         mgr.on("settings", () => {
@@ -275,7 +278,7 @@ describe("StreamEventBridge — subscription lifecycle", () => {
     });
 
     it("removeAllListeners() with no argument clears every listener", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let settingsCount = 0;
         let goawayCount = 0;
         mgr.on("settings", () => {
@@ -294,7 +297,7 @@ describe("StreamEventBridge — subscription lifecycle", () => {
     });
 
     it("removeListener() unsubscribes a listener (delegates to off)", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let count = 0;
         const listener = () => {
             count += 1;
@@ -312,7 +315,7 @@ describe("StreamEventBridge — subscription lifecycle", () => {
 
 describe("stream manager — illegal frames on request stream (dispatchToPending fallthrough)", () => {
     it("ignores SETTINGS frames dispatched to a pending request stream", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
         mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
@@ -325,7 +328,7 @@ describe("stream manager — illegal frames on request stream (dispatchToPending
     });
 
     it("ignores GOAWAY frames dispatched to a pending request stream", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
         mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
@@ -335,7 +338,7 @@ describe("stream manager — illegal frames on request stream (dispatchToPending
     });
 
     it("ignores CANCEL_PUSH frames dispatched to a pending request stream", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
         mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
@@ -350,7 +353,7 @@ describe("stream manager — illegal frames on request stream (dispatchToPending
         // dispatchToPending (line 265), we send a PUSH_PROMISE to a push stream
         // via dispatchPushFrame instead — push frames bypass the PUSH_PROMISE
         // early-return.
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const result = new Promise((resolve, reject) => mgr.expectPush(4n, resolve, reject));
         mgr.dispatchPushFrame(4n, HEADERS([0x80]));
@@ -363,7 +366,7 @@ describe("stream manager — illegal frames on request stream (dispatchToPending
 
 describe("stream manager — control stream ignores DATA/HEADERS/PUSH_PROMISE + GREASE (lines 295-302)", () => {
     it("ignores GREASE / unknown frames on the control stream", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let settingsCount = 0;
         mgr.on("settings", () => {
             settingsCount += 1;
@@ -377,7 +380,7 @@ describe("stream manager — control stream ignores DATA/HEADERS/PUSH_PROMISE + 
     });
 
     it("ignores DATA frames on the control stream", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let settingsCount = 0;
         mgr.on("settings", () => {
             settingsCount += 1;
@@ -390,7 +393,7 @@ describe("stream manager — control stream ignores DATA/HEADERS/PUSH_PROMISE + 
     });
 
     it("ignores HEADERS frames on the control stream", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let settingsCount = 0;
         mgr.on("settings", () => {
             settingsCount += 1;
@@ -402,7 +405,7 @@ describe("stream manager — control stream ignores DATA/HEADERS/PUSH_PROMISE + 
     });
 
     it("ignores PUSH_PROMISE frames on the control stream", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let settingsCount = 0;
         mgr.on("settings", () => {
             settingsCount += 1;
@@ -416,7 +419,7 @@ describe("stream manager — control stream ignores DATA/HEADERS/PUSH_PROMISE + 
 
 describe("stream manager — PUSH_PROMISE emits 'pushPromise' (lines 225-226)", () => {
     it("emits 'pushPromise' when a PUSH_PROMISE frame arrives on a request stream", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let gotPushId: bigint | undefined;
         let gotPayload: Bytes | undefined;
         mgr.on("pushPromise", (pushId: bigint, payload: Bytes) => {
@@ -438,7 +441,7 @@ describe("stream manager — PUSH_PROMISE emits 'pushPromise' (lines 225-226)", 
 
 describe("stream manager — CANCEL_PUSH rejects a registered push (lines 292-293, 339-342)", () => {
     it("silently ignores CANCEL_PUSH for an unknown push id", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         // No push registered — cancelPush must be a safe no-op (exercises the
         // `p === undefined` false branch at line 340).
         expect(() =>
@@ -447,7 +450,7 @@ describe("stream manager — CANCEL_PUSH rejects a registered push (lines 292-29
     });
 
     it("rejects the push resolver with PushCancelledError on CANCEL_PUSH", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
 
         const p = new Promise<void>((resolve, reject) => {
             // Register a push with pushId=3n.
@@ -475,7 +478,7 @@ describe("stream manager — CANCEL_PUSH rejects a registered push (lines 292-29
 
 describe("stream manager — abortAll rejects pushes (line 351)", () => {
     it("rejects both pending responses and registered pushes", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
 
         const pResp = new Promise<void>((resolve, reject) => {

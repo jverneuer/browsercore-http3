@@ -47,6 +47,7 @@ import type {
     Http3Request,
     QuicConnection,
 } from "../src/types.js";
+import { createMockEventProvider } from "./test-helpers.js";
 
 // ---------------------------------------------------------------------------
 // errors.ts — every branch (with and without `cause`) of every error class.
@@ -359,7 +360,7 @@ describe("TODO stubs throw their placeholder error", () => {
     });
 
     it("createStreamManager is implemented (delegated to stream.test.ts)", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} }, createMockEventProvider());
         expect(typeof mgr).toBe("object");
         expect(typeof mgr.expectResponse).toBe("function");
     });

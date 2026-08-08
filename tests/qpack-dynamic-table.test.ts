@@ -12,6 +12,7 @@ import {
     QpackDynamicTable,
 } from "../src/qpack/qpack.js";
 import { Http3FrameType, Http3Settings, type QuicConnection, type QuicStream } from "../src/types.js";
+import { createMockEventProvider } from "./test-helpers.js";
 
 async function serverFinishHandshakeWithQpack(quic: FakeQuic): Promise<{
     serverControl: QuicStream;
@@ -42,6 +43,7 @@ describe("QPACK dynamic table — encoder wiring into request()", () => {
         const quic = new FakeQuic();
         const connPromise = connectHttp3({
             quic: quic.client,
+            events: createMockEventProvider(),
             settingsAckTimeoutMs: 5000,
             initialSettings: { [Http3Settings.QPACK_MAX_TABLE_CAPACITY]: 1024 },
         });
@@ -73,7 +75,7 @@ describe("QPACK dynamic table — encoder wiring into request()", () => {
 describe("QPACK dynamic table — SETTINGS_QPACK_MAX_TABLE_CAPACITY flow control", () => {
     it("applies peer capacity via Set Capacity on encoder stream", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl, clientEncoder } = await serverFinishHandshakeWithQpack(quic);
         await serverControl.write(serializeFrame({
             type: Http3FrameType.SETTINGS,
@@ -95,7 +97,7 @@ describe("QPACK dynamic table — SETTINGS_QPACK_MAX_TABLE_CAPACITY flow control
 describe("QPACK dynamic table — decoder-stream read loop", () => {
     it("processes Section Ack, Stream Cancellation, Insert Count Increment", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const { serverControl, serverDecoder } = await serverFinishHandshakeWithQpack(quic);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
         const conn = await connPromise;
@@ -182,6 +184,7 @@ describe("QPACK dynamic table — constructor applies initial capacity", () => {
         const quic = new FakeQuic();
         const conn = new Http3ConnectionImpl("test_id", {
             quic: quic.client,
+            events: createMockEventProvider(),
             initialSettings: { [Http3Settings.QPACK_MAX_TABLE_CAPACITY]: 512 },
         });
         expect(conn.id).toBe("test_id");
