@@ -66,17 +66,18 @@ await conn.close();
 
 ```
 @browsercore/http3
-  └─ (no @browsercore/* dependencies — QUIC connection is injected)
+  └─ @browsercore/contracts (EventProvider interface — injected, not implemented)
 ```
 
 The QUIC connection is injected — `@browsercore/http3` imports only the
 `QuicConnection` *type*, never a concrete implementation. The concrete QUIC
 implementation lives in a separate `@browsercore/quic` package (future) and
 satisfies this interface. HTTP/3 needs no crypto of its own (QPACK is
-compression-only, and there is no PING frame), so the package has no runtime
-dependency on any other `@browsercore/*` package.
+compression-only, and there is no PING frame).
 
-No other `@browsercore/*` packages are imported.
+The only `@browsercore/*` runtime dependency is `@browsercore/contracts`, which
+supplies the `EventProvider` interface. The concrete event backend is injected
+at the composition root (`browsersmith`); this package implements none of it.
 
 ## Position in BrowserCore
 

@@ -25,6 +25,7 @@ import { encodeHeaders } from "../src/qpack/qpack.js";
 import { Http3FrameType } from "../src/types.js";
 import { SettingsAckTimeoutError } from "../src/errors.js";
 import type { QuicConnection, QuicStream } from "../src/types.js";
+import { createMockEventProvider } from "./test-helpers.js";
 
 /** Server-side: complete the handshake and return the server control stream. */
 async function serverFinishHandshake(server: QuicConnection): Promise<QuicStream> {
@@ -45,7 +46,7 @@ async function serverFinishHandshake(server: QuicConnection): Promise<QuicStream
 describe("connection lifecycle (Steps 6-8)", () => {
     it("times out when the peer never acknowledges SETTINGS", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 50 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 50 });
         // Signal QUIC handshake complete so connectHttp3 may begin the HTTP/3
         // SETTINGS exchange, then complete the handshake up to reading the
         // client SETTINGS — but do NOT send the server's SETTINGS back.
@@ -56,7 +57,7 @@ describe("connection lifecycle (Steps 6-8)", () => {
 
     it("sends HEADERS + DATA(payload) for a request with a body", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         quic.completeHandshake();
         const serverControl = await serverFinishHandshake(quic.server);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
@@ -90,7 +91,7 @@ describe("connection lifecycle (Steps 6-8)", () => {
 
     it("close() is idempotent and suppresses the second GOAWAY", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         quic.completeHandshake();
         const serverControl = await serverFinishHandshake(quic.server);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
@@ -102,7 +103,7 @@ describe("connection lifecycle (Steps 6-8)", () => {
 
     it("aborts an in-flight request when the peer sends GOAWAY", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         quic.completeHandshake();
         const serverControl = await serverFinishHandshake(quic.server);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
@@ -127,7 +128,7 @@ describe("connection lifecycle (Steps 6-8)", () => {
 
     it("throws if request() is called while the connection is closing", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         quic.completeHandshake();
         const serverControl = await serverFinishHandshake(quic.server);
         await serverControl.write(serializeFrame({ type: Http3FrameType.SETTINGS, settings: {} }));
@@ -169,7 +170,7 @@ describe("connection lifecycle (Steps 6-8)", () => {
 describe("connection — sendGoaway / sendCancelPush with no control stream", () => {
     it("sendGoaway returns early before the handshake opens the control stream", async () => {
         const quic = new FakeQuic();
-        const conn = new Http3ConnectionImpl("test_id", { quic: quic.client });
+        const conn = new Http3ConnectionImpl("test_id", { quic: quic.client, events: createMockEventProvider() });
         // controlStream is undefined before doHandshake; goaway() must be a
         // safe no-op rather than throwing on undefined access.
         await expect(conn.goaway(0n)).resolves.toBeUndefined();
@@ -179,7 +180,7 @@ describe("connection — sendGoaway / sendCancelPush with no control stream", ()
 describe("connection — QPACK stream read loops", () => {
     it("drains encoder-stream instructions from the peer", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         // Signal QUIC handshake complete so connectHttp3 opens its streams.
         quic.completeHandshake();
         // Drive the handshake manually so we can capture the server's QPACK

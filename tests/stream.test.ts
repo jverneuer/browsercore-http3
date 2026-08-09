@@ -10,6 +10,9 @@
 import { describe, it, expect } from "vitest";
 import { createStreamManager, PushCancelledError } from "../src/stream/stream.js";
 import { Http3FrameType, type Http3Frame } from "../src/types.js";
+import { createMockEventProvider } from "./test-helpers.js";
+
+const newManager = () => createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} }, createMockEventProvider());
 
 const HEADERS = (payload: number[]): Http3Frame => ({
     type: Http3FrameType.HEADERS,
@@ -25,7 +28,7 @@ const MAX_PUSH_ID = (pushId: bigint): Http3Frame => ({ type: Http3FrameType.MAX_
 
 describe("control stream dispatch", () => {
     it("emits a 'settings' event when a SETTINGS frame arrives", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let seen = false;
         mgr.on("settings", () => {
             seen = true;
@@ -35,7 +38,7 @@ describe("control stream dispatch", () => {
     });
 
     it("emits a 'goaway' event with the stream id", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let got: bigint | undefined;
         mgr.on("goaway", (id: bigint) => {
             got = id;
@@ -45,7 +48,7 @@ describe("control stream dispatch", () => {
     });
 
     it("emits a 'maxPushId' event with the push id", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         let got: bigint | undefined;
         mgr.on("maxPushId", (id: bigint) => {
             got = id;
@@ -57,7 +60,7 @@ describe("control stream dispatch", () => {
 
 describe("bidirectional request/response correlation", () => {
     it("resolves a registered response when HEADERS + DATA arrive", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
 
         const result = new Promise((resolve, reject) => {
@@ -73,7 +76,7 @@ describe("bidirectional request/response correlation", () => {
     });
 
     it("ignores frames for unknown streams", () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.dispatchRequestFrame(4n, HEADERS([0x80]));
         mgr.dispatchRequestFrame(4n, DATA([0x61]));
     });
@@ -81,7 +84,7 @@ describe("bidirectional request/response correlation", () => {
 
 describe("abortAll", () => {
     it("rejects all registered responses", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
 
         const p = new Promise<void>((resolve, reject) => {
@@ -95,7 +98,7 @@ describe("abortAll", () => {
 
 describe("push streams", () => {
     it("correlates a push response by push id", async () => {
-        const mgr = createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} });
+        const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
 
         const result = new Promise((resolve, reject) => {

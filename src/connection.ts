@@ -45,7 +45,6 @@ import {
     type Bytes,
     type Clock,
     type ConnectionId,
-    type EventEmitterLike,
     type Http3Connection,
     type Http3Frame,
     type Http3Options,
@@ -59,7 +58,7 @@ import {
 import { FrameReader, readFrame, serializeFrame } from "./frame/frame.js";
 import { QpackDecoder, QpackEncoder } from "./qpack/qpack.js";
 import { ByteReader, readPrefixedInt } from "./qpack/encoding.js";
-import { createStreamManager } from "./stream/stream.js";
+import { createStreamManager, type StreamManager } from "./stream/stream.js";
 import {
     ConnectionClosingError,
     GoawayReceivedError,
@@ -93,7 +92,7 @@ export class Http3ConnectionImpl implements Http3Connection {
     private readonly quic: QuicConnection;
     private readonly qpackDec: QpackDecoder;
     private readonly qpackEnc: QpackEncoder;
-    private readonly manager: ReturnType<typeof createStreamManager> & EventEmitterLike;
+    private readonly manager: StreamManager;
     private readonly clock: Clock;
 
     /** Our control + QPACK streams (written to). */
@@ -135,7 +134,7 @@ export class Http3ConnectionImpl implements Http3Connection {
             sendCancelPush: (pushId) => {
                 void this.sendCancelPush(pushId);
             },
-        });
+        }, options.events);
         this.manager.setHeaderDecoder((block, streamId) => this.decodeHeaders(block, streamId));
         this.manager.on("goaway", (lastStreamId: Http3StreamId) => {
             this.onPeerGoaway(lastStreamId);

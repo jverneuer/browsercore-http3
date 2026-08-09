@@ -18,6 +18,7 @@ import { encodeHeaders } from "../src/qpack/qpack.js";
 import { Http3FrameType } from "../src/types.js";
 import { PushCancelledError } from "../src/errors.js";
 import type { QuicConnection, QuicStream } from "../src/types.js";
+import { createMockEventProvider } from "./test-helpers.js";
 
 async function drivePushServer(server: QuicConnection): Promise<void> {
     const clientControl = await server.acceptUnidirectionalStream().catch(() => null);
@@ -119,7 +120,7 @@ describe("HTTP/3 server push (Step 9)", () => {
         const quic = new FakeQuic();
         const serverDone = drivePushServer(quic.server);
         quic.completeHandshake();
-        const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const conn = await connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const reqPromise = conn.request({
             method: "GET", scheme: "https", authority: "example.com", path: "/index.html",
             headers: new Map(), body: undefined,
@@ -139,7 +140,7 @@ describe("HTTP/3 server push (Step 9)", () => {
         const quic = new FakeQuic();
         const serverDone = driveCancelPushServer(quic.server);
         quic.completeHandshake();
-        const conn = await connectHttp3({ quic: quic.client, settingsAckTimeoutMs: 5000 });
+        const conn = await connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
         const reqPromise = conn.request({
             method: "GET", scheme: "https", authority: "example.com", path: "/index.html",
             headers: new Map(), body: undefined,

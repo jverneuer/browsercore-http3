@@ -18,6 +18,8 @@
  *     QUIC handles flow control, reset, and liveness.
  */
 
+import type { EventProvider } from "@browsercore/contracts";
+
 // ---------------------------------------------------------------------------
 // Domain primitives
 // ---------------------------------------------------------------------------
@@ -283,33 +285,6 @@ export const systemClock: Clock = {
 };
 
 // ---------------------------------------------------------------------------
-// Event-emitter abstraction (injected — decouples the public API from node:events)
-// ---------------------------------------------------------------------------
-
-/**
- * Minimal event-emitter shape the stream manager exposes.
- *
- * Package-local on purpose: the stream manager's public contract must not leak
- * Node's `node:events.EventEmitter` type, or every consumer (and every host
- * embedding this package in a browser / worker) transitively depends on a
- * Node-specific type. Only the methods the manager actually uses are declared;
- * the concrete `StreamEventBridge` backs them with a platform `EventTarget`.
- */
-// The `TArgs` parameter is load-bearing: it lets callers pass listeners whose
-// arguments are typed (e.g. `(lastStreamId: Http3StreamId) => void`) without
-// relying on the hidden `any` that Node's `EventEmitter` falls back to. A plain
-// `(...args: unknown[]) => void` listener type would reject those listeners under
-// strictFunctionTypes, so the generic is required — not ornamental.
-/* oxlint-disable typescript/no-unnecessary-type-parameters */
-export interface EventEmitterLike {
-    on<TArgs extends unknown[]>(event: string | symbol, listener: (...args: TArgs) => void): void;
-    once<TArgs extends unknown[]>(event: string | symbol, listener: (...args: TArgs) => void): void;
-    off<TArgs extends unknown[]>(event: string | symbol, listener: (...args: TArgs) => void): void;
-    emit(event: string | symbol, ...args: unknown[]): boolean;
-}
-/* oxlint-enable typescript/no-unnecessary-type-parameters */
-
-// ---------------------------------------------------------------------------
 // Request / response / connection contract
 // ---------------------------------------------------------------------------
 
@@ -356,6 +331,12 @@ export interface Http3Connection {
 export interface Http3Options {
     /** The underlying QUIC connection (already handshaked). */
     readonly quic: QuicConnection;
+    /**
+     * Injected EventProvider backend for the stream manager. Provided by the
+     * composition root (browsersmith) — this package supplies no fallback so
+     * the backend stays swappable (Node EventEmitter, EventTarget, mock).
+     */
+    readonly events: EventProvider;
     /** Initial local settings to advertise in the SETTINGS frame. */
     readonly initialSettings?: Http3SettingsMap;
     /** Timeout for receiving the peer's SETTINGS ACK. Default 5000ms. */
