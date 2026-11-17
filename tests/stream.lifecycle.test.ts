@@ -26,8 +26,14 @@
 
 import { describe, it, expect } from "vitest";
 import { createStreamManager, PushCancelledError } from "../src/stream/stream.js";
-import { Http3FrameType, HTTP3_UNKNOWN_FRAME_TYPE, type Http3Frame } from "../src/types.js";
-import { createMockEventProvider } from "./test-helpers.js";
+import {
+    Http3FrameType,
+    HTTP3_UNKNOWN_FRAME_TYPE,
+    type Bytes,
+    type Http3Frame,
+    type Http3Response,
+} from "../src/types.js";
+import { createMockEventProvider, makeStreamId } from "./test-helpers.js";
 
 const newManager = () => createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} }, createMockEventProvider());
 
@@ -49,21 +55,21 @@ describe("stream manager — finalize (status + body)", () => {
     it("parses a non-200 status from :status", async () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "404"]]));
-        const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(0n, DATA([0x61]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectResponse(makeStreamId(0), resolve, reject));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([0x61]));
         expect((await result).statusCode).toBe(404);
     });
 
     it("delivers the request body from the DATA frame", async () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
-        const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectResponse(makeStreamId(0), resolve, reject));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
         // The manager treats every DATA frame as the end of the stream (a
         // simplification: it sets endStreamSeen on any DATA), so the body is
         // whatever the (single) DATA frame carried.
-        mgr.dispatchRequestFrame(0n, DATA([0x61, 0x62, 0x63, 0x64]));
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([0x61, 0x62, 0x63, 0x64]));
         const res = await result;
         expect(new TextDecoder().decode(res.body)).toBe("abcd");
     });
@@ -71,9 +77,9 @@ describe("stream manager — finalize (status + body)", () => {
     it("falls back to status 200 when :status is not finite", async () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "not-a-number"]]));
-        const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(0n, DATA([]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectResponse(makeStreamId(0), resolve, reject));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([]));
         expect((await result).statusCode).toBe(200);
     });
 
@@ -82,9 +88,9 @@ describe("stream manager — finalize (status + body)", () => {
         // A decoder that returns headers WITHOUT a :status key exercises the
         // `status === undefined` false branch in finalize (line 210).
         mgr.setHeaderDecoder(() => new Map([["content-type", "text/plain"]]));
-        const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(0n, DATA([0x61]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectResponse(makeStreamId(0), resolve, reject));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([0x61]));
         expect((await result).statusCode).toBe(200);
     });
 });
@@ -93,15 +99,15 @@ describe("stream manager — dispatch edge cases", () => {
     it("ignores frames for an unknown stream id", () => {
         const mgr = newManager();
         // No expectResponse registered — must be a silent no-op.
-        mgr.dispatchRequestFrame(4n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(4n, DATA([0x61]));
+        mgr.dispatchRequestFrame(makeStreamId(4), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(4), DATA([0x61]));
     });
 
     it("ignores push frames for an unknown push id", () => {
         const mgr = newManager();
         // No expectPush registered — must be a silent no-op.
-        mgr.dispatchPushFrame(4n, HEADERS([0x80]));
-        mgr.dispatchPushFrame(4n, DATA([0x61]));
+        mgr.dispatchPushFrame(makeStreamId(4), HEADERS([0x80]));
+        mgr.dispatchPushFrame(makeStreamId(4), DATA([0x61]));
     });
 
     it("rejects the response when the header decoder throws (default decoder)", async () => {
@@ -109,10 +115,10 @@ describe("stream manager — dispatch edge cases", () => {
         // Do NOT set a header decoder: the default decoder throws
         // "no header decoder set", and finalize rejects the response.
         const result = new Promise<void>((resolve, reject) => {
-            mgr.expectResponse(0n, () => reject(new Error("should not resolve")), () => resolve());
+            mgr.expectResponse(makeStreamId(0), () => reject(new Error("should not resolve")), () => resolve());
         });
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(0n, DATA([]));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([]));
         await result;
     });
 
@@ -123,20 +129,20 @@ describe("stream manager — dispatch edge cases", () => {
             throw new Error("boom");
         });
         const result = new Promise<void>((resolve, reject) => {
-            mgr.expectResponse(0n, () => reject(new Error("should not resolve")), () => resolve());
+            mgr.expectResponse(makeStreamId(0), () => reject(new Error("should not resolve")), () => resolve());
         });
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(0n, DATA([]));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([]));
         await result;
     });
 
     it("correlates a push response by push id", async () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
-        const result = new Promise((resolve, reject) => mgr.expectPush(2n, resolve, reject));
-        mgr.dispatchPushFrame(2n, HEADERS([0x80]));
-        mgr.dispatchPushFrame(2n, DATA([0x7a]));
-        const res = (await result) as { statusCode: number; body: Uint8Array };
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectPush(makeStreamId(2), resolve, reject));
+        mgr.dispatchPushFrame(makeStreamId(2), HEADERS([0x80]));
+        mgr.dispatchPushFrame(makeStreamId(2), DATA([0x7a]));
+        const res = await result;
         expect(res.statusCode).toBe(200);
         expect(new TextDecoder().decode(res.body)).toBe("z");
     });
@@ -144,12 +150,12 @@ describe("stream manager — dispatch edge cases", () => {
     it("ignores GREASE / unknown frames on a request stream", async () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
-        const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectResponse(makeStreamId(0), resolve, reject));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
         // GREASE frame between HEADERS and DATA must be ignored (not treated as
         // DATA, which would prematurely signal endStream).
-        mgr.dispatchRequestFrame(0n, GREASE([0xff]));
-        mgr.dispatchRequestFrame(0n, DATA([]));
+        mgr.dispatchRequestFrame(makeStreamId(0), GREASE([0xff]));
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([]));
         expect((await result).statusCode).toBe(200);
     });
 });
@@ -192,7 +198,7 @@ describe("stream manager — abortAll", () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
         const p = new Promise<void>((resolve, reject) => {
-            mgr.expectResponse(0n, () => reject(new Error("should not resolve")), () => resolve());
+            mgr.expectResponse(makeStreamId(0), () => reject(new Error("should not resolve")), () => resolve());
         });
         mgr.abortAll(new Error("connection closed"));
         await p;
@@ -317,33 +323,33 @@ describe("stream manager — illegal frames on request stream (dispatchToPending
     it("ignores SETTINGS frames dispatched to a pending request stream", async () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
-        const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectResponse(makeStreamId(0), resolve, reject));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
         // A SETTINGS frame on a request stream is illegal — must be ignored
         // (falls through the SETTINGS/CANCEL_PUSH/PUSH_PROMISE/GOAWAY/
         // MAX_PUSH_ID cases in dispatchToPending, line 265 break).
-        mgr.dispatchRequestFrame(0n, { type: Http3FrameType.SETTINGS, settings: {} });
-        mgr.dispatchRequestFrame(0n, DATA([0x61]));
+        mgr.dispatchRequestFrame(makeStreamId(0), { type: Http3FrameType.SETTINGS, settings: {} });
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([0x61]));
         expect((await result).statusCode).toBe(200);
     });
 
     it("ignores GOAWAY frames dispatched to a pending request stream", async () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
-        const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(0n, { type: Http3FrameType.GOAWAY, streamId: 99n });
-        mgr.dispatchRequestFrame(0n, DATA([0x62]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectResponse(makeStreamId(0), resolve, reject));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(0), { type: Http3FrameType.GOAWAY, streamId: 99n });
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([0x62]));
         expect((await result).statusCode).toBe(200);
     });
 
     it("ignores CANCEL_PUSH frames dispatched to a pending request stream", async () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
-        const result = new Promise((resolve, reject) => mgr.expectResponse(0n, resolve, reject));
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(0n, { type: Http3FrameType.CANCEL_PUSH, pushId: 5n });
-        mgr.dispatchRequestFrame(0n, DATA([0x63]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectResponse(makeStreamId(0), resolve, reject));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(0), { type: Http3FrameType.CANCEL_PUSH, pushId: 5n });
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([0x63]));
         expect((await result).statusCode).toBe(200);
     });
 
@@ -355,11 +361,11 @@ describe("stream manager — illegal frames on request stream (dispatchToPending
         // early-return.
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
-        const result = new Promise((resolve, reject) => mgr.expectPush(4n, resolve, reject));
-        mgr.dispatchPushFrame(4n, HEADERS([0x80]));
+        const result = new Promise<Http3Response>((resolve, reject) => mgr.expectPush(makeStreamId(4), resolve, reject));
+        mgr.dispatchPushFrame(makeStreamId(4), HEADERS([0x80]));
         // PUSH_PROMISE on a push stream — illegal, must hit the fallthrough break.
-        mgr.dispatchPushFrame(4n, { type: Http3FrameType.PUSH_PROMISE, pushId: 1n, payload: new Uint8Array([0x00]) });
-        mgr.dispatchPushFrame(4n, DATA([0x7a]));
+        mgr.dispatchPushFrame(makeStreamId(4), { type: Http3FrameType.PUSH_PROMISE, pushId: 1n, payload: new Uint8Array([0x00]) });
+        mgr.dispatchPushFrame(makeStreamId(4), DATA([0x7a]));
         expect((await result).statusCode).toBe(200);
     });
 });
@@ -429,7 +435,7 @@ describe("stream manager — PUSH_PROMISE emits 'pushPromise' (lines 225-226)", 
         // A PUSH_PROMISE on a request stream triggers the early-return in
         // dispatchRequestFrame (lines 225-226), emitting 'pushPromise' with
         // the push id and header-block payload.
-        mgr.dispatchRequestFrame(0n, {
+        mgr.dispatchRequestFrame(makeStreamId(0), {
             type: Http3FrameType.PUSH_PROMISE,
             pushId: 7n,
             payload: new Uint8Array([0x80, 0x01]),
@@ -455,7 +461,7 @@ describe("stream manager — CANCEL_PUSH rejects a registered push (lines 292-29
         const p = new Promise<void>((resolve, reject) => {
             // Register a push with pushId=3n.
             mgr.expectPush(
-                3n,
+                makeStreamId(3),
                 () => reject(new Error("push should not resolve")),
                 (err) => {
                     // Verify the error is a PushCancelledError with the right pushId.
@@ -482,10 +488,10 @@ describe("stream manager — abortAll rejects pushes (line 351)", () => {
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
 
         const pResp = new Promise<void>((resolve, reject) => {
-            mgr.expectResponse(0n, () => reject(new Error("response should not resolve")), () => resolve());
+            mgr.expectResponse(makeStreamId(0), () => reject(new Error("response should not resolve")), () => resolve());
         });
         const pPush = new Promise<void>((resolve, reject) => {
-            mgr.expectPush(2n, () => reject(new Error("push should not resolve")), () => resolve());
+            mgr.expectPush(makeStreamId(2), () => reject(new Error("push should not resolve")), () => resolve());
         });
 
         // abortAll iterates both `pending` and `pushes` maps — the pushes

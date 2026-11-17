@@ -9,6 +9,25 @@
  */
 
 import type { Clock, EventProvider } from "@browsercore/contracts";
+import type { ConnectionId, Http3StreamId } from "../src/types.js";
+
+/**
+ * Brand a raw value as an Http3StreamId. Tests drive the stream manager and
+ * connection directly, and those APIs only accept branded ids (standards §14)
+ * — this is the same boundary cast src/connection.ts applies when it
+ * allocates ids, kept test-side like quic's makeStreamId helper.
+ */
+export function makeStreamId(value: number | bigint): Http3StreamId {
+    return BigInt(value) as Http3StreamId;
+}
+
+/**
+ * Brand a raw string as a ConnectionId (mirrors createId()'s boundary cast)
+ * so tests can construct Http3ConnectionImpl with a predictable id.
+ */
+export function makeConnectionId(value: string): ConnectionId {
+    return value as ConnectionId;
+}
 
 /**
  * Create a minimal in-memory EventProvider. Stand-in for the Node

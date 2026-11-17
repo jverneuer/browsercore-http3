@@ -42,11 +42,7 @@ import {
 } from "../src/index.js";
 import { readFrame, serializeFrame } from "../src/frame/frame.js";
 import { concat, concatAll } from "../src/utils.js";
-import type {
-    Http3Frame,
-    Http3Request,
-    QuicConnection,
-} from "../src/types.js";
+import type { Http3Frame } from "../src/types.js";
 import { createMockEventProvider } from "./test-helpers.js";
 
 // ---------------------------------------------------------------------------

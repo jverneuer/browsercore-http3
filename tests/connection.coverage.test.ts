@@ -17,11 +17,11 @@
 
 import { describe, it, expect } from "vitest";
 import { connectHttp3 } from "../src/connection.js";
-import { FakeQuic } from "./fake-quic.ts";
+import { FakeQuic } from "./fake-quic.js";
 import { FrameReader, serializeFrame } from "../src/frame/frame.js";
 import { encodeHeaders } from "../src/qpack/qpack.js";
 import { Http3FrameType } from "../src/types.js";
-import type { QuicConnection, QuicStream } from "../src/types.js";
+import type { QuicStream } from "../src/types.js";
 import { createMockClock, createMockEventProvider } from "./test-helpers.js";
 
 /**

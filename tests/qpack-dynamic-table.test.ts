@@ -11,8 +11,8 @@ import {
     QpackDecoder,
     QpackDynamicTable,
 } from "../src/qpack/qpack.js";
-import { Http3FrameType, Http3Settings, type QuicConnection, type QuicStream } from "../src/types.js";
-import { createMockClock, createMockEventProvider } from "./test-helpers.js";
+import { Http3FrameType, Http3Settings, type QuicStream } from "../src/types.js";
+import { createMockClock, createMockEventProvider, makeConnectionId } from "./test-helpers.js";
 
 async function serverFinishHandshakeWithQpack(quic: FakeQuic): Promise<{
     serverControl: QuicStream;
@@ -182,7 +182,7 @@ describe("QPACK dynamic table — eviction respects capacity", () => {
 describe("QPACK dynamic table — constructor applies initial capacity", () => {
     it("constructs without throwing", () => {
         const quic = new FakeQuic();
-        const conn = new Http3ConnectionImpl("test_id", {
+        const conn = new Http3ConnectionImpl(makeConnectionId("test_id"), {
             quic: quic.client,
             events: createMockEventProvider(), clock: createMockClock(),
             initialSettings: { [Http3Settings.QPACK_MAX_TABLE_CAPACITY]: 512 },
