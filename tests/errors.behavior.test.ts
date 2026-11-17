@@ -20,7 +20,7 @@ import {
 } from "../src/index.js";
 
 /** Build one instance of every error class (the without-cause path). */
-function everyError(): Error[] {
+function everyError(): Http3Error[] {
     return [
         new Http3Error("a"),
         new GoawayReceivedError(1n),
@@ -74,7 +74,7 @@ describe("error hierarchy", () => {
 
 describe("kind discriminant", () => {
     it("every error exposes a unique `kind` matching its class name", () => {
-        const kinds = everyError().map((e) => (e as { kind: string }).kind);
+        const kinds = everyError().map((e) => e.kind);
         expect(kinds).toEqual([
             "Http3Error",
             "GoawayReceivedError",

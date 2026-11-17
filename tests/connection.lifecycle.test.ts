@@ -25,7 +25,7 @@ import { encodeHeaders } from "../src/qpack/qpack.js";
 import { Http3FrameType } from "../src/types.js";
 import { SettingsAckTimeoutError } from "../src/errors.js";
 import type { QuicConnection, QuicStream } from "../src/types.js";
-import { createMockClock, createMockEventProvider } from "./test-helpers.js";
+import { createMockClock, createMockEventProvider, makeConnectionId } from "./test-helpers.js";
 
 /** Server-side: complete the handshake and return the server control stream. */
 async function serverFinishHandshake(server: QuicConnection): Promise<QuicStream> {
@@ -170,7 +170,7 @@ describe("connection lifecycle (Steps 6-8)", () => {
 describe("connection — sendGoaway / sendCancelPush with no control stream", () => {
     it("sendGoaway returns early before the handshake opens the control stream", async () => {
         const quic = new FakeQuic();
-        const conn = new Http3ConnectionImpl("test_id", { quic: quic.client, events: createMockEventProvider(), clock: createMockClock() });
+        const conn = new Http3ConnectionImpl(makeConnectionId("test_id"), { quic: quic.client, events: createMockEventProvider(), clock: createMockClock() });
         // controlStream is undefined before doHandshake; goaway() must be a
         // safe no-op rather than throwing on undefined access.
         await expect(conn.goaway(0n)).resolves.toBeUndefined();

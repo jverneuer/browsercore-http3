@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ConnectionClosedError } from "../src/errors.ts";
+import { ConnectionClosedError } from "../src/errors.js";
 import { createId, assertNever, concat, concatAll } from "../src/utils.js";
 
 describe("ConnectionClosedError", () => {

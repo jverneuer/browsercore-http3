@@ -8,9 +8,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { createStreamManager, PushCancelledError } from "../src/stream/stream.js";
-import { Http3FrameType, type Http3Frame } from "../src/types.js";
-import { createMockEventProvider } from "./test-helpers.js";
+import { createStreamManager } from "../src/stream/stream.js";
+import { Http3FrameType, type Http3Frame, type Http3Response } from "../src/types.js";
+import { createMockEventProvider, makeStreamId } from "./test-helpers.js";
 
 const newManager = () => createStreamManager({ sendGoaway: () => {}, sendCancelPush: () => {} }, createMockEventProvider());
 
@@ -63,22 +63,22 @@ describe("bidirectional request/response correlation", () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
 
-        const result = new Promise((resolve, reject) => {
-            mgr.expectResponse(0n, resolve, reject);
+        const result = new Promise<Http3Response>((resolve, reject) => {
+            mgr.expectResponse(makeStreamId(0), resolve, reject);
         });
 
-        mgr.dispatchRequestFrame(0n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(0n, DATA([0x61, 0x62]));
+        mgr.dispatchRequestFrame(makeStreamId(0), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(0), DATA([0x61, 0x62]));
 
-        const res = (await result) as { statusCode: number; body: Uint8Array };
+        const res = await result;
         expect(res.statusCode).toBe(200);
         expect(new TextDecoder().decode(res.body)).toBe("ab");
     });
 
     it("ignores frames for unknown streams", () => {
         const mgr = newManager();
-        mgr.dispatchRequestFrame(4n, HEADERS([0x80]));
-        mgr.dispatchRequestFrame(4n, DATA([0x61]));
+        mgr.dispatchRequestFrame(makeStreamId(4), HEADERS([0x80]));
+        mgr.dispatchRequestFrame(makeStreamId(4), DATA([0x61]));
     });
 });
 
@@ -88,7 +88,7 @@ describe("abortAll", () => {
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
 
         const p = new Promise<void>((resolve, reject) => {
-            mgr.expectResponse(0n, () => reject(new Error("should not resolve")), () => resolve());
+            mgr.expectResponse(makeStreamId(0), () => reject(new Error("should not resolve")), () => resolve());
         });
 
         mgr.abortAll(new Error("connection closed"));
@@ -101,14 +101,14 @@ describe("push streams", () => {
         const mgr = newManager();
         mgr.setHeaderDecoder(() => new Map([[":status", "200"]]));
 
-        const result = new Promise((resolve, reject) => {
-            mgr.expectPush(2n, resolve, reject);
+        const result = new Promise<Http3Response>((resolve, reject) => {
+            mgr.expectPush(makeStreamId(2), resolve, reject);
         });
 
-        mgr.dispatchPushFrame(2n, HEADERS([0x80]));
-        mgr.dispatchPushFrame(2n, DATA([0x7a]));
+        mgr.dispatchPushFrame(makeStreamId(2), HEADERS([0x80]));
+        mgr.dispatchPushFrame(makeStreamId(2), DATA([0x7a]));
 
-        const res = (await result) as { statusCode: number };
+        const res = await result;
         expect(res.statusCode).toBe(200);
     });
 });

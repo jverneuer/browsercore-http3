@@ -14,8 +14,8 @@ import {
     Http3FrameType,
     Http3Settings,
     isGreaseFrameType,
+    type Bytes,
     type Http3Frame,
-    type Http3UnknownFrame,
 } from "../src/index.js";
 import { readFrame, serializeFrame } from "../src/frame/frame.js";
 import { concat } from "../src/utils.js";
@@ -114,8 +114,11 @@ describe("SETTINGS frame", () => {
         const parsed = (await parseAll(bytes))[0]!;
         expect(parsed.type).toBe(Http3FrameType.SETTINGS);
         if (parsed.type === Http3FrameType.SETTINGS) {
-            expect(parsed.settings[0x1]).toBe(100);
-            expect(parsed.settings[0x9]).toBeUndefined();
+            expect(parsed.settings[Http3Settings.QPACK_MAX_TABLE_CAPACITY]).toBe(100);
+            // 0x9 is reserved (RFC 9114 §7.2.4) — outside Http3SettingsKey, so
+            // assert absence by key membership rather than index-signature
+            // lookup, which the type rightly forbids for unknown ids.
+            expect(Object.hasOwn(parsed.settings, 0x9)).toBe(false);
         }
     });
 });
