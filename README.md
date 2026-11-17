@@ -2,8 +2,9 @@
 
 
 [![npm version](https://img.shields.io/npm/v/@browsercore/http3)](https://www.npmjs.com/package/@browsercore/http3)
-[![coverage](https://img.shields.io/endpoint?url=https://jverneuer.github.io/browsercore-http3/badge.json)](https://github.com/jverneuer/browsercore-http3/blob/main/COVERAGE.md)
-[![lint](https://img.shields.io/github/actions/workflow/status/jverneuer/browsercore-http3/ci.yml?label=lint)](https://github.com/jverneuer/browsercore-http3/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://jverneuer.github.io/browsercore-http3/badge.json)](https://jverneuer.github.io/browsercore-http3/COVERAGE.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/jverneuer/browsercore-http3/ci.yml?label=ci)](https://github.com/jverneuer/browsercore-http3/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/@browsercore/http3.svg)](LICENSE)
 
 HTTP/3 framing + QPACK over QUIC streams.
 
