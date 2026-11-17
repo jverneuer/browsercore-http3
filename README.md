@@ -27,7 +27,11 @@ transport — it could be a real QUIC connection, a pipe, or a test double.
 ```ts
 import { connectHttp3, GoawayReceivedError } from "@browsercore/http3";
 
-const conn = await connectHttp3({ quic: quicConnection });
+const conn = await connectHttp3({
+    quic: quicConnection,
+    events: eventProvider, // injected EventProvider (contracts)
+    clock,                 // injected canonical Clock (contracts)
+});
 
 const res = await conn.request({
     method: "GET",
@@ -66,7 +70,7 @@ await conn.close();
 
 ```
 @browsercore/http3
-  └─ @browsercore/contracts (EventProvider interface — injected, not implemented)
+  └─ @browsercore/contracts (EventProvider + Clock interfaces — injected, not implemented)
 ```
 
 The QUIC connection is injected — `@browsercore/http3` imports only the
@@ -76,8 +80,30 @@ satisfies this interface. HTTP/3 needs no crypto of its own (QPACK is
 compression-only, and there is no PING frame).
 
 The only `@browsercore/*` runtime dependency is `@browsercore/contracts`, which
-supplies the `EventProvider` interface. The concrete event backend is injected
-at the composition root (`browsersmith`); this package implements none of it.
+supplies the `EventProvider` and canonical `Clock` interfaces. Both backends
+are injected at the composition root (`browsersmith`) — this package supplies
+no fallbacks and implements neither; `@browsercore/quic` and
+`@browsercore/transport` are devDependencies (conformance-reference/test use
+only, no `src/` import).
+
+## Contract conformance
+
+This package is the polyrepo's sanctioned **replacement-implementation proof
+pattern**: the `QuicConnection` interface (`src/types.ts`) is a *structural*
+contract — no `@browsercore/quic` import anywhere in `src/` — proven by an
+end-to-end suite that swaps the real QUIC layer for `tests/fake-quic.ts` and
+drives full request/response, push, QPACK, and GOAWAY flows over it
+(`tests/http3.e2e.test.ts`, `tests/push.e2e.test.ts`). A future concrete
+`@browsercore/quic` that satisfies the same shape drops in without touching
+protocol code. When another package needs to prove that an injected dependency
+can be swapped for an independent implementation, this is the pattern to copy:
+structural interface in `types.ts`, zero imports of the implementation package,
+fake-implementation e2e proof in `tests/`.
+
+The injected seams (`events: EventProvider`, `clock: Clock` — the canonical
+contracts Clock since 0.1.9, replacing this package's former local disposer
+Clock) follow the same rule: no fallback, no platform globals in `src/`, all
+time and event backends supplied by the composition root.
 
 ## Position in BrowserCore
 

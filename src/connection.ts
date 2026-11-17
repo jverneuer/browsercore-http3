@@ -38,12 +38,11 @@
  * `@browsercore/quic` package. Tests drive this with a fake QUIC connection.
  */
 
+import type { Clock } from "@browsercore/contracts";
 import {
     Http3FrameType,
     Http3Settings,
-    systemClock,
     type Bytes,
-    type Clock,
     type ConnectionId,
     type Http3Connection,
     type Http3Frame,
@@ -115,7 +114,7 @@ export class Http3ConnectionImpl implements Http3Connection {
         this.id = id;
         this.settings = options.initialSettings ?? {};
         this.quic = options.quic;
-        this.clock = options.clock ?? systemClock;
+        this.clock = options.clock;
         this.qpackDec = new QpackDecoder();
         this.qpackEnc = new QpackEncoder();
         // Apply our advertised QPACK max capacity to both codec sides. Our
@@ -564,15 +563,20 @@ export class Http3ConnectionImpl implements Http3Connection {
         void this.startDecoderStreamReadLoop(peerDecoder);
 
         // Wait for the peer's SETTINGS (signalled via the manager's "settings" event).
+        // Canonical-Clock adaptation (audit item #6): the local disposer-shaped
+        // `setTimeout(fn, ms): () => void` was replaced by the contracts Clock's
+        // `setTimeout(ms, fn): TimerHandle` + `clearTimeout(handle)` pair — the
+        // success path cancels the handle directly instead of calling a wrapper
+        // closure (minimal-diff option: no local disposer helper).
         return new Promise<void>((resolve, reject) => {
-            const cancel = this.clock.setTimeout(() => {
+            const timer = this.clock.setTimeout(timeoutMs, () => {
                 this.manager.off("settings", onSettings);
                 reject(new SettingsAckTimeoutError(timeoutMs));
                 this.manager.abortAll(new SettingsAckTimeoutError(timeoutMs));
-            }, timeoutMs);
+            });
 
             const onSettings = (): void => {
-                cancel();
+                this.clock.clearTimeout(timer);
                 this.manager.off("settings", onSettings);
                 resolve();
             };
@@ -647,7 +651,7 @@ export class Http3ConnectionImpl implements Http3Connection {
  * awaits the peer's SETTINGS.
  */
 export async function connectHttp3(options: Http3Options): Promise<Http3Connection> {
-    const clock = options.clock ?? systemClock;
+    const clock = options.clock;
     const id = `http3_${clock.now().toString(36)}` as ConnectionId;
     const timeoutMs = options.settingsAckTimeoutMs ?? DEFAULT_SETTINGS_ACK_TIMEOUT_MS;
     // The QUIC handshake must complete before we exchange HTTP/3 SETTINGS —

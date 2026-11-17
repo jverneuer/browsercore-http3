@@ -2,6 +2,7 @@
  * Small shared helpers for @browsercore/http3.
  */
 
+import type { Clock } from "@browsercore/contracts";
 import type { Bytes } from "./types.js";
 
 /**
@@ -14,14 +15,18 @@ export function assertNever(x: never): never {
 }
 
 /**
- * Monotonic-ish unique id generator (not cryptographically random).
+ * Monotonic-ish unique id generator.
  *
- * This is the single sanctioned home for `Date.now()` / `Math.random()` in
- * utils — other modules that need an opaque id must call this rather than
- * reaching for randomness directly.
+ * Time is read from the injected canonical `Clock` — never a bare `Date.now()`
+ * — so ids are deterministic under an injected test clock. The uniqueness
+ * suffix stays `Math.random()`: these ids are for logging / correlation only
+ * and are NOT cryptographic, so routing the suffix through a crypto provider
+ * would add coupling without benefit. This is the single sanctioned home for
+ * `Math.random()` in the package — other modules that need an opaque id must
+ * call this rather than reaching for randomness directly.
  */
-export function createId(prefix: string): string {
-    return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
+export function createId(prefix: string, clock: Pick<Clock, "now">): string {
+    return `${prefix}_${clock.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
 /** Concatenate two byte arrays. */
