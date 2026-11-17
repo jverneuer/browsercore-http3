@@ -18,7 +18,7 @@ import { FrameReader, serializeFrame } from "../src/frame/frame.js";
 import { encodeHeaders } from "../src/qpack/qpack.js";
 import { Http3FrameType } from "../src/types.js";
 import type { QuicConnection, QuicStream } from "../src/types.js";
-import { createMockEventProvider } from "./test-helpers.js";
+import { createMockClock, createMockEventProvider } from "./test-helpers.js";
 
 /**
  * A server driver that does NOT signal the handshake. Lets tests observe the
@@ -46,7 +46,7 @@ describe("QUIC handshake integration (Phase 4)", () => {
         // Fire connectHttp3 WITHOUT signalling the handshake. It must block on
         // quic.handshake() and NOT open any unidirectional streams on the
         // server side yet.
-        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), clock: createMockClock(), settingsAckTimeoutMs: 5000 });
 
         // Give the event loop a few ticks — if connectHttp3 did not await the
         // handshake, it would have opened streams by now.
@@ -80,7 +80,7 @@ describe("QUIC handshake integration (Phase 4)", () => {
 
     it("exchanges SETTINGS over the protected connection after the handshake", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), clock: createMockClock(), settingsAckTimeoutMs: 5000 });
         quic.completeHandshake();
 
         // Drive the server: accept the client's SETTINGS and reply with our
@@ -134,7 +134,7 @@ describe("QUIC handshake integration (Phase 4)", () => {
 
     it("wires QPACK encoder/decoder streams over the protected connection", async () => {
         const quic = new FakeQuic();
-        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
+        const connPromise = connectHttp3({ quic: quic.client, events: createMockEventProvider(), clock: createMockClock(), settingsAckTimeoutMs: 5000 });
         quic.completeHandshake();
 
         const server = quic.server;
@@ -178,7 +178,7 @@ describe("QUIC handshake integration (Phase 4)", () => {
         // Signal the handshake eagerly — connectHttp3 should proceed immediately.
         quic.completeHandshake();
         const serverDone = driveServerNoHandshake(quic.server);
-        const conn = await connectHttp3({ quic: quic.client, events: createMockEventProvider(), settingsAckTimeoutMs: 5000 });
+        const conn = await connectHttp3({ quic: quic.client, events: createMockEventProvider(), clock: createMockClock(), settingsAckTimeoutMs: 5000 });
         expect(conn).toBeDefined();
         await conn.close();
         await serverDone;

@@ -1,13 +1,14 @@
 /**
- * Shared test helpers for http3 tests — an in-memory EventProvider mock.
+ * Shared test helpers for http3 tests — an in-memory EventProvider mock and a
+ * real-timer-backed canonical Clock.
  *
- * The http3 package provides NO fallback EventProvider; the stream manager
- * requires one to be injected. This mock implements the full EventProvider
- * interface so tests can construct managers and connections without pulling
- * in node:events.
+ * The http3 package provides NO fallback EventProvider and NO fallback Clock;
+ * both must be injected (Http3Options). These mocks implement the full
+ * contracts interfaces so tests can construct connections without the package
+ * pulling in node:events or bare timer globals.
  */
 
-import type { EventProvider } from "@browsercore/contracts";
+import type { Clock, EventProvider } from "@browsercore/contracts";
 
 /**
  * Create a minimal in-memory EventProvider. Stand-in for the Node
@@ -47,6 +48,29 @@ export function createMockEventProvider(): EventProvider {
         removeAllListeners(event) {
             if (event) listeners.delete(event);
             else listeners.clear();
+        },
+    };
+}
+
+/**
+ * Create a real-timer-backed canonical Clock. Stand-in for the platform clock
+ * that browsersmith injects in production. Timing semantics stay real (the
+ * handshake-timeout tests rely on timers actually firing after N ms); the
+ * seam exists so the connection code never touches timer globals directly.
+ *
+ * @returns A fresh Clock implementing the full contracts surface.
+ */
+export function createMockClock(): Clock {
+    return {
+        now: () => Date.now(),
+        monotonic: () => performance.now(),
+        sleep: (ms) =>
+            new Promise<void>((resolve) => {
+                globalThis.setTimeout(resolve, ms);
+            }),
+        setTimeout: (ms, fn) => globalThis.setTimeout(fn, ms),
+        clearTimeout: (handle) => {
+            globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>);
         },
     };
 }

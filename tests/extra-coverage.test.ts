@@ -29,12 +29,18 @@ describe("ConnectionClosedError", () => {
 });
 
 describe("utils — createId", () => {
-    it("generates unique ids with the given prefix", () => {
-        const a = createId("http3");
-        const b = createId("http3");
+    it("generates unique ids: timestamp from the injected clock, random suffix", () => {
+        const fixedClock = { now: () => 123 }; // 123.toString(36) === "3f"
+        const a = createId("http3", fixedClock);
+        const b = createId("http3", fixedClock);
         expect(a).toMatch(/^http3_/);
         expect(b).toMatch(/^http3_/);
-        expect(a).not.toBe(b); // monotonic-ish: Date.now or random differ
+        // The timestamp segment is the injected clock's now() — deterministic
+        // under a fixed clock (no bare Date.now anywhere in src).
+        expect(a.startsWith("http3_3f_")).toBe(true);
+        expect(b.startsWith("http3_3f_")).toBe(true);
+        // Uniqueness comes from the non-crypto Math.random suffix.
+        expect(a).not.toBe(b);
     });
 });
 
